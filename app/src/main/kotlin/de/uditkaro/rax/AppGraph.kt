@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -64,6 +63,7 @@ class AppGraph(val app: Application) {
         scope = scope,
         http = http,
         tailnetHttp = tailnetHttp,
+        tailnetUp = tailnet.status.map { it is TailnetStatus.Running }.stateIn(scope, SharingStarted.Eagerly, false),
         keepInBackground = settings.map { it?.backgroundAlerts == true }.stateIn(scope, SharingStarted.Eagerly, false),
     )
 
@@ -84,15 +84,10 @@ class AppGraph(val app: Application) {
         scope.launch {
             connections.hosts.collect { hosts -> if (hosts.orEmpty().any { it.tailnet }) tailnet.start() }
         }
-        // Hosts that waited for the node or the permission connect as soon as it is there,
-        // without waiting out their retry delay.
+        // LAN hosts that waited for the permission connect as soon as it is granted, without waiting
+        // out their retry delay.
         scope.launch {
-            tailnet.status.map { it is TailnetStatus.Running }.distinctUntilChanged().collect { up ->
-                if (up) connections.retryAll(tailnet = true)
-            }
-        }
-        scope.launch {
-            localNetwork.granted.collect { granted -> if (granted) connections.retryAll(tailnet = false) }
+            localNetwork.granted.collect { granted -> if (granted) connections.retryLocal() }
         }
     }
 

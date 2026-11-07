@@ -57,6 +57,9 @@ says Rex is newer. Before raising Rax's revision, read the schema diff (see "Whe
 - The control connection retries with backoff, from 500 ms up to 30 s with jitter. It does not
   retry after `Incompatible` or HTTP 403. `Connections` calls `retryNow()` when the default network
   changes.
+- Home shows a host as offline from its second failed attempt in a row. A single lost connection
+  or unreachable attempt is common on a phone, so it shows as connecting. A TLS failure, a refusal,
+  a server that is not Rex, or an incompatible one shows at once, because retrying will not fix it.
 - A reconnect that sends the reconnect token resumes the same client ID if the server still holds
   it. The server keeps a dropped client for 60 s, and a resumed client gets its panes back.
 - `stop()` closes with 1000, which ends the client on the server at once. `suspendConnection()`

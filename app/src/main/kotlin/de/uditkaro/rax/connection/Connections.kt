@@ -53,6 +53,8 @@ class Connections(
     private val http: OkHttpClient,
     /** Reaches the tailnet through the app's own node. */
     private val tailnetHttp: OkHttpClient,
+    /** Whether the app's Tailscale node is running, which hosts on the tailnet need before they can connect. */
+    private val tailnetUp: StateFlow<Boolean>,
     private val keepInBackground: StateFlow<Boolean>,
 ) {
 
@@ -86,7 +88,7 @@ class Connections(
             override fun onStart(owner: LifecycleOwner) {
                 inForeground = true
                 backgroundJob?.cancel()
-                _live.value.values.forEach { it.rex.start() }
+                startAll()
             }
 
             override fun onStop(owner: LifecycleOwner) {
@@ -100,8 +102,20 @@ class Connections(
         })
         scope.launch {
             keepInBackground.collect { keep ->
-                if (keep) _live.value.values.forEach { it.rex.start() }
+                if (keep) startAll()
                 else if (!inForeground) _live.value.values.forEach { it.rex.client.suspendConnection() }
+            }
+        }
+        // While the node is down, every attempt to reach a tailnet host fails at once. Those attempts
+        // would count as failures and show the host as unreachable after the node comes up, so a
+        // host that is not connected waits for the node and then starts again from its first attempt.
+        scope.launch {
+            tailnetUp.collect { up ->
+                _live.value.values.filter { it.host.tailnet }.forEach {
+                    if (it.rex.client.state.value is RexClient.State.Connected) return@forEach
+                    it.rex.client.suspendConnection()
+                    if (up && active) it.rex.start()
+                }
             }
         }
         val connectivity = app.getSystemService(ConnectivityManager::class.java)
@@ -115,18 +129,24 @@ class Connections(
     fun get(hostId: String): LiveHost? = _live.value[hostId]
 
     fun retry(hostId: String) {
-        _live.value[hostId]?.rex?.let {
-            it.start()
-            it.retryNow()
-        }
+        val live = _live.value[hostId] ?: return
+        if (live.host.tailnet && !tailnetUp.value) return
+        live.rex.start()
+        live.rex.retryNow()
     }
 
-    /** Reconnects now every host that goes through Tailscale, or every host that does not. */
-    fun retryAll(tailnet: Boolean) {
-        _live.value.values.filter { it.host.tailnet == tailnet }.forEach { it.rex.retryNow() }
+    /** Reconnects now every host that does not go through Tailscale. */
+    fun retryLocal() {
+        _live.value.values.filter { !it.host.tailnet }.forEach { it.rex.retryNow() }
     }
 
     private val active: Boolean get() = inForeground || keepInBackground.value
+
+    private fun canRun(host: Host): Boolean = active && (!host.tailnet || tailnetUp.value)
+
+    private fun startAll() {
+        _live.value.values.forEach { if (canRun(it.host)) it.rex.start() }
+    }
 
     private fun sync(hosts: List<Host>) {
         val next = HashMap<String, LiveHost>()
@@ -149,7 +169,7 @@ class Connections(
                 }
             }
             next[host.id] = LiveHost(host, endpoint, rex, hostScope)
-            if (active) rex.start()
+            if (canRun(host)) rex.start()
         }
         (old.keys - next.keys).forEach { id -> old[id]?.let { it.rex.stop(); it.scope.cancel() } }
         _live.value = next

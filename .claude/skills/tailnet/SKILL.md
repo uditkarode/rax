@@ -30,8 +30,11 @@ Consequences:
 
 - `AppGraph` starts the node when any saved host uses the tailnet. Signing in from Settings starts
   it too.
-- When the node becomes Running, `Connections.retryAll(tailnet = true)` reconnects the tailnet
-  hosts at once, instead of waiting out their backoff.
+- A tailnet host connects only while the node is Running. While the node is down every attempt
+  fails at once, and those failures would make the host look unreachable after the node comes up.
+  So whenever the node's state changes, `Connections` stops each tailnet host that is not
+  connected, and starts it again from its first attempt once the node runs. A connected host is
+  left alone, because its connection can outlast a short drop of the node.
 - Retry on a tailnet host, on Home or in a pane, starts the node again before it reconnects.
 - Sign-in: when the node needs a login, its status carries the auth URL, and Rax opens it in a
   Custom Tab (`rememberTailnetSignIn`). Keys live in `noBackupFilesDir/tailnet`, so a backup

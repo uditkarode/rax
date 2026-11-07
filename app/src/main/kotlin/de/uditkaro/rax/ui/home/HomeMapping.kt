@@ -184,8 +184,15 @@ fun tabRow(
 
 private fun linkOf(r: Resources, host: Host, state: HostState?): Link = when (val l = state?.link) {
     null, RexClient.State.Stopped, is RexClient.State.Connected -> Link.Connecting
-    is RexClient.State.Connecting -> if (l.attempt < 2) Link.Connecting else Link.Offline(r.getString(R.string.problem_unreachable))
-    is RexClient.State.Down -> Link.Offline(problemText(r, l.problem, host.tailnet))
+    is RexClient.State.Connecting -> if (l.attempt < 2) Link.Connecting else Link.Offline(
+        problemText(r, l.lastProblem ?: Problem.Unreachable("no answer"), host.tailnet),
+    )
+    // A single lost connection or failed attempt is common on a phone, and the next attempt follows
+    // half a second later, so the host shows as offline from the second failure on.
+    is RexClient.State.Down -> when {
+        l.attempt == 0 && l.retryInMs != null && (l.problem is Problem.Unreachable || l.problem is Problem.Closed) -> Link.Connecting
+        else -> Link.Offline(problemText(r, l.problem, host.tailnet))
+    }
 }
 
 /** Whether Rax can talk to [host] now, and if not, why. */

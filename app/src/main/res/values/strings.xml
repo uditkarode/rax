@@ -126,7 +126,7 @@
     <string name="host_address_placeholder">192.168.1.20:7297</string>
     <string name="host_route">Connection</string>
     <string name="host_tailnet">Through Tailscale</string>
-    <string name="host_tailnet_footnote">Rax joins your tailnet by itself. The rest of the phone stays off it.</string>
+    <string name="host_tailnet_footnote">Rax joins your tailnet by itself. The rest of the phone stays off it. Login, if required, will be asked for on the home screen.</string>
     <string name="host_summary_plain">Connects to %1$s without encryption, so use it only on a network you trust.</string>
     <string name="host_summary_tls">Connects to %1$s with TLS.</string>
     <string name="host_summary_tailnet">Connects to %1$s through Tailscale.</string>

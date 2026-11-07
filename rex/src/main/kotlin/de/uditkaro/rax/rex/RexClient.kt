@@ -94,10 +94,14 @@ class RexClient(
 ) {
     sealed interface State {
         data object Stopped : State
-        data class Connecting(val attempt: Int) : State
+        /** [attempt] counts from 0 after each connection. [lastProblem] is why the attempt before failed. */
+        data class Connecting(val attempt: Int, val lastProblem: Problem? = null) : State
         data class Connected(val welcome: Welcome) : State
-        /** [retryInMs] is null when retrying cannot help until something changes, such as an update. */
-        data class Down(val problem: Problem, val retryInMs: Long?) : State
+        /**
+         * Attempt number [attempt] failed. [retryInMs] is null when retrying cannot help until
+         * something changes, such as an update.
+         */
+        data class Down(val problem: Problem, val retryInMs: Long?, val attempt: Int) : State
     }
 
     private val _state = MutableStateFlow<State>(State.Stopped)
@@ -214,7 +218,7 @@ class RexClient(
     private suspend fun run() {
         var attempt = 0
         while (scope.isActive) {
-            _state.value = State.Connecting(attempt)
+            _state.value = State.Connecting(attempt, (_state.value as? State.Down)?.problem)
             val conn = Connection()
             current = conn
             try {
@@ -259,8 +263,9 @@ class RexClient(
         if (current === conn) current = null
         signalChannel.send(ClientSignal.Disconnected(problem))
 
-        val retry = retryDelay(problem, attempt++)
-        _state.value = State.Down(problem, retry)
+        val failed = attempt++
+        val retry = retryDelay(problem, failed)
+        _state.value = State.Down(problem, retry, failed)
         if (retry == null) {
             wake.receive()
             attempt = 0
