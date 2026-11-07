@@ -49,6 +49,6 @@ class OpenTypeTest {
 
     @Test(expected = OpenType.NotAFont::class)
     fun rejectsTruncatedFonts() {
-        OpenType.read(File(fonts, "hack/regular.ttf").readBytes().copyOf(300))
+        OpenType.read(File(fonts, "jetbrains-mono/regular.ttf").readBytes().copyOf(300))
     }
 }

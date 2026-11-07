@@ -83,6 +83,13 @@
     <string name="terminal_use_here">Use here</string>
     <string name="terminal_closed">This pane closed.</string>
     <string name="terminal_unavailable">This computer is not connected.</string>
+    <string name="terminal_connecting">Connecting to %1$s…</string>
+    <string name="terminal_loading">Loading…</string>
+    <string name="terminal_loading_size">Loading… %1$s</string>
+    <string name="terminal_failed">Couldn’t open this pane.</string>
+    <string name="terminal_lost">Lost the connection to this pane.</string>
+    <string name="terminal_needs_tailnet">Tailscale is signed out. Sign in on the home screen to reach this computer.</string>
+    <string name="terminal_needs_local_network">Rax needs local network access to reach this computer. Allow it on the home screen.</string>
 
     <string name="key_left">Left</string>
     <string name="key_right">Right</string>

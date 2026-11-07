@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -73,6 +74,11 @@ class AppGraph(val app: Application) {
 
     init {
         scope.launch(Dispatchers.IO) { _themes.value = ThemeCatalog.load(app.assets) }
+        scope.launch(Dispatchers.IO) {
+            // The saved font can be one that an update no longer bundles.
+            val fontId = settings.filterNotNull().first().fontId
+            if (!fonts.exists(fontId)) settingsStore.setFont(Settings.DEFAULT_FONT)
+        }
         Alerts(app, connections, scope)
         scope.launch { watching.filterNotNull().collect { syncAlertService() } }
         scope.launch {

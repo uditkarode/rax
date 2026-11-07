@@ -61,19 +61,6 @@
     ]
   },
   {
-    "id": "source-code-pro",
-    "name": "Source Code Pro",
-    "version": "2.042R-u/1.062R-i",
-    "license": "OFL-1.1",
-    "source": "https://github.com/adobe-fonts/source-code-pro",
-    "styles": [
-      "regular",
-      "bold",
-      "italic",
-      "bolditalic"
-    ]
-  },
-  {
     "id": "geist-mono",
     "name": "Geist Mono",
     "version": "1.9.2",
@@ -100,61 +87,11 @@
     ]
   },
   {
-    "id": "hack",
-    "name": "Hack",
-    "version": "3.003",
-    "license": "MIT AND Bitstream-Vera",
-    "source": "https://github.com/source-foundry/Hack",
-    "styles": [
-      "regular",
-      "bold",
-      "italic",
-      "bolditalic"
-    ]
-  },
-  {
     "id": "roboto-mono",
     "name": "Roboto Mono",
     "version": "3.001",
     "license": "OFL-1.1",
     "source": "https://github.com/googlefonts/RobotoMono",
-    "styles": [
-      "regular",
-      "bold",
-      "italic",
-      "bolditalic"
-    ]
-  },
-  {
-    "id": "inconsolata",
-    "name": "Inconsolata",
-    "version": "3.000",
-    "license": "OFL-1.1",
-    "source": "https://github.com/googlefonts/Inconsolata",
-    "styles": [
-      "regular",
-      "bold"
-    ]
-  },
-  {
-    "id": "ubuntu-mono",
-    "name": "Ubuntu Mono",
-    "version": "0.80",
-    "license": "Ubuntu-font-1.0",
-    "source": "https://github.com/google/fonts/tree/main/ufl/ubuntumono",
-    "styles": [
-      "regular",
-      "bold",
-      "italic",
-      "bolditalic"
-    ]
-  },
-  {
-    "id": "victor-mono",
-    "name": "Victor Mono",
-    "version": "1.5.6",
-    "license": "OFL-1.1",
-    "source": "https://github.com/rubjo/victor-mono",
     "styles": [
       "regular",
       "bold",
@@ -183,58 +120,6 @@
     "styles": [
       "regular",
       "bold"
-    ]
-  },
-  {
-    "id": "intel-one-mono",
-    "name": "Intel One Mono",
-    "version": "1.5.0",
-    "license": "OFL-1.1",
-    "source": "https://github.com/intel/intel-one-mono",
-    "styles": [
-      "regular",
-      "bold",
-      "italic",
-      "bolditalic"
-    ]
-  },
-  {
-    "id": "atkinson-hyperlegible-mono",
-    "name": "Atkinson Hyperlegible Mono",
-    "version": "2.001",
-    "license": "OFL-1.1",
-    "source": "https://github.com/googlefonts/atkinson-hyperlegible-next-mono",
-    "styles": [
-      "regular",
-      "bold",
-      "italic",
-      "bolditalic"
-    ]
-  },
-  {
-    "id": "maple-mono",
-    "name": "Maple Mono",
-    "version": "7.9",
-    "license": "OFL-1.1",
-    "source": "https://github.com/subframe7536/maple-font",
-    "styles": [
-      "regular",
-      "bold",
-      "italic",
-      "bolditalic"
-    ]
-  },
-  {
-    "id": "dejavu-sans-mono",
-    "name": "DejaVu Sans Mono",
-    "version": "2.37",
-    "license": "Bitstream-Vera",
-    "source": "https://github.com/dejavu-fonts/dejavu-fonts",
-    "styles": [
-      "regular",
-      "bold",
-      "italic",
-      "bolditalic"
     ]
   }
 ]

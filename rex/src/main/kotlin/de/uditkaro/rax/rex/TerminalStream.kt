@@ -35,6 +35,8 @@ class TerminalStream(
     val blockId: String,
 ) {
     sealed interface Event {
+        /** The snapshot is still arriving; [bytes] have come so far. */
+        data class Loading(val bytes: Long) : Event
         /** A new stream began. Rebuild the emulator from [snapshot] (null: start blank). */
         class Started(val snapshot: ByteArray?) : Event
         class Output(val bytes: ByteArray) : Event
@@ -54,6 +56,7 @@ class TerminalStream(
         var resume: Handshake? = null
         var received = 0L
         var parser: StreamParser? = null
+        var started = false
         var failures = 0
         var rejects = 0
 
@@ -126,6 +129,7 @@ class TerminalStream(
                         if (!resumed) {
                             parser = StreamParser(nonce)
                             received = 0
+                            started = false
                         }
                         resume = Handshake(token, nonce)
                         failures = 0
@@ -135,10 +139,12 @@ class TerminalStream(
                     welcome != null && welcome.size >= 2 && welcome[0] == 0x82.toByte() -> {
                         // If Rex rejects a resume, drop the token and open a new stream. If Rex rejects
                         // a new HELLO, try again. Rex keeps rejecting it until it closes this client's
-                        // old stream.
+                        // old stream. When the pane was just left and opened again, that takes Rex a
+                        // moment, so those tries come quickly at first.
                         if (resume == null) {
                             if (++rejects == REJECTS_BEFORE_INTERRUPTED) send(Event.Interrupted)
-                            delay(backoff(failures++))
+                            val stillOpen = welcome[1] == REJECT_ALREADY_CONNECTED
+                            delay(if (stillOpen && rejects <= QUICK_RETRIES) QUICK_RETRY_MS else backoff(failures++))
                         }
                         resume = null
                         parser = null
@@ -161,7 +167,10 @@ class TerminalStream(
                     when (m) {
                         is Incoming.Bytes -> {
                             received += m.bytes.size
-                            for (part in p.feed(m.bytes)) {
+                            val parts = p.feed(m.bytes)
+                            if (!started && parts.isEmpty()) send(Event.Loading(received))
+                            for (part in parts) {
+                                if (part is StreamPart.Snapshot) started = true
                                 send(
                                     when (part) {
                                         is StreamPart.Snapshot -> Event.Started(part.bytes)
@@ -205,6 +214,9 @@ class TerminalStream(
         private const val BLOCK_CLOSED = 4000
         private const val HANDSHAKE_TIMEOUT_MS = 10_000L
         private const val REJECTS_BEFORE_INTERRUPTED = 3
+        private const val REJECT_ALREADY_CONNECTED: Byte = 0x02
+        private const val QUICK_RETRIES = 20
+        private const val QUICK_RETRY_MS = 250L
     }
 }
 

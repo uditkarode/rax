@@ -39,6 +39,7 @@ private val software = listOf(
 fun AcknowledgementsScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -> Unit) {
     val fonts = graph.fonts.bundled.map { Credit(it.name, it.license, "fonts/${it.id}/LICENSE.txt") } +
         Credit("Symbols Nerd Font", "MIT, CC BY 4.0", "fonts/symbols-nerd/LICENSE.txt") +
+        Credit("JuliaMono", "OFL-1.1", "fonts/juliamono/LICENSE.txt") +
         Credit("Google Sans Flex", "OFL-1.1", "fonts/google-sans-flex-LICENSE.txt")
 
     LargeTitleScreen(stringResource(R.string.acknowledgements_title), onBack) {

@@ -23,8 +23,9 @@ import kotlinx.serialization.json.Json
 
 /**
  * The terminal's fonts: the families bundled in `assets/fonts` and the ones the user adds from
- * files. Every typeface falls back to the Nerd Font symbols, then to the system's monospace, so
- * prompt glyphs and CJK text still draw.
+ * files. Every typeface falls back to the Nerd Font icons, then to JuliaMono for symbols the font
+ * lacks, then to the system's monospace for CJK and other scripts. JuliaMono comes before the
+ * system fonts, so symbols such as ⏺ and ⏸ draw as text, the way desktop terminals show them.
  */
 class TerminalFonts(private val context: Context) {
 
@@ -74,8 +75,10 @@ class TerminalFonts(private val context: Context) {
     private val full = ConcurrentHashMap<String, Typeface>()
     private val previews = ConcurrentHashMap<String, Typeface>()
 
-    private val fallback: FontFamily by lazy {
-        FontFamily.Builder(Font.Builder(assets, "fonts/symbols-nerd/regular.ttf").build()).build()
+    private val fallbacks: List<FontFamily> by lazy {
+        listOf("fonts/symbols-nerd/regular.ttf", "fonts/juliamono/regular.ttf").map { path ->
+            FontFamily.Builder(Font.Builder(assets, path).build()).build()
+        }
     }
 
     fun name(id: String): String =
@@ -97,7 +100,7 @@ class TerminalFonts(private val context: Context) {
             ?: imported.first { it.id == id }.let { importedFonts(it, previewOnly) }
         val family = FontFamily.Builder(fonts.first()).apply { fonts.drop(1).forEach(::addFont) }.build()
         Typeface.CustomFallbackBuilder(family)
-            .addCustomFallback(fallback)
+            .apply { fallbacks.forEach(::addCustomFallback) }
             .setSystemFallback("monospace")
             .build()
     } catch (e: Exception) {

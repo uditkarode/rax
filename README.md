@@ -10,7 +10,7 @@ panes that run in Rex on your computer, and opens each pane as a live terminal o
 - Split, rename and close panes, tabs and sessions.
 - Rax's own Tailscale node: Rax reaches computers on your tailnet without the Tailscale app and
   without a VPN on the phone.
-- All of Rex's color themes, light and dark, and 19 terminal fonts. You can add your own font files.
+- All of Rex's color themes, light and dark, and 10 terminal fonts. You can add your own font files.
 
 Rax needs Android 13 or later.
 
@@ -112,6 +112,6 @@ host page says so. When the two have no revision in common, Home tells you which
 - Color themes from Rex.
 - Google Sans Flex for the interface, and the terminal fonts listed in
   `app/src/main/assets/fonts/fonts.json`, each under its own license (mostly SIL OFL 1.1).
-  Symbols Nerd Font fills in icon glyphs.
+  Symbols Nerd Font fills in icon glyphs, and JuliaMono fills in other symbols the terminal font lacks.
 
 The Acknowledgements page in Settings shows every license in full.

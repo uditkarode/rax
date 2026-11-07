@@ -127,22 +127,24 @@ private fun linkOf(r: Resources, host: Host, state: HostState?): Link = when (va
     is RexClient.State.Down -> Link.Offline(problemText(r, l.problem, host.tailnet))
 }
 
+/** Whether Rax can talk to [host] now, and if not, why. */
+fun hostLink(r: Resources, host: Host, state: HostState?, access: Access): Link = when {
+    state?.link is RexClient.State.Connected && state.ready -> Link.Online(host.tailnet)
+    host.tailnet -> when (access.tailnet) {
+        is TailnetStatus.NeedsLogin -> Link.Blocked(Need.TailscaleSignIn)
+        TailnetStatus.NeedsApproval -> Link.Offline(r.getString(R.string.problem_tailnet_approval), retryable = false)
+        is TailnetStatus.Error -> Link.Offline(r.getString(R.string.problem_tailnet_failed))
+        TailnetStatus.Stopped, TailnetStatus.Starting -> Link.Connecting
+        is TailnetStatus.Running -> linkOf(r, host, state)
+    }
+    !access.localNetwork -> Link.Blocked(Need.LocalNetwork)
+    else -> linkOf(r, host, state)
+}
+
 fun buildHome(r: Resources, hosts: List<Host>, states: Map<String, HostState>, access: Access): HomeState {
     val cards = hosts.map { host ->
         val state = states[host.id]
-        val online = state?.link is RexClient.State.Connected && state.ready
-        val link = when {
-            online -> Link.Online(host.tailnet)
-            host.tailnet -> when (val t = access.tailnet) {
-                is TailnetStatus.NeedsLogin -> Link.Blocked(Need.TailscaleSignIn)
-                TailnetStatus.NeedsApproval -> Link.Offline(r.getString(R.string.problem_tailnet_approval), retryable = false)
-                is TailnetStatus.Error -> Link.Offline(r.getString(R.string.problem_tailnet_failed))
-                TailnetStatus.Stopped, TailnetStatus.Starting -> Link.Connecting
-                is TailnetStatus.Running -> linkOf(r, host, state)
-            }
-            !access.localNetwork -> Link.Blocked(Need.LocalNetwork)
-            else -> linkOf(r, host, state)
-        }
+        val link = hostLink(r, host, state, access)
         val sessions = state?.sessions.orEmpty().map { s ->
             val name = s.info.label
             SessionGroup(

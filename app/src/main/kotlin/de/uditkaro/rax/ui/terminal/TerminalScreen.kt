@@ -1,5 +1,6 @@
 package de.uditkaro.rax.ui.terminal
 
+import android.text.format.Formatter
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -20,12 +21,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
@@ -44,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
@@ -79,7 +83,7 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
     val host by vm.host.collectAsStateWithLifecycle()
     val target by vm.target.collectAsStateWithLifecycle()
     val session by vm.session.collectAsStateWithLifecycle()
-    val status by vm.status.collectAsStateWithLifecycle()
+    val view by vm.view.collectAsStateWithLifecycle()
     val s = settings ?: return
     val theme = activeTheme(s, themes ?: return)
     val typeface = rememberTerminalTypeface(graph, s.fontId)
@@ -145,7 +149,15 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
                     onFontSizeChanged = { size -> graph.updateSettings { setFontSize(size) } },
                 )
             }
-            PaneOverlay(status, onUseHere = vm::useHere, onBack = onBack)
+            PaneOverlay(
+                // The pane can be ready before its font has loaded.
+                view = if (typeface == null && (view == PaneView.Live || view == PaneView.Reconnecting)) PaneView.Loading(false, 0) else view,
+                hostName = vm.live?.host?.name.orEmpty(),
+                hasScreen = session != null && typeface != null,
+                onRetry = vm::retry,
+                onUseHere = vm::useHere,
+                onBack = onBack,
+            )
         }
 
         if (imeVisible) {
@@ -310,9 +322,17 @@ private fun PaneSwitcher(panes: List<String>, selected: String?, host: HostState
 }
 
 @Composable
-private fun PaneOverlay(status: PaneStatus, onUseHere: () -> Unit, onBack: () -> Unit) {
+private fun PaneOverlay(
+    view: PaneView,
+    hostName: String,
+    hasScreen: Boolean,
+    onRetry: () -> Unit,
+    onUseHere: () -> Unit,
+    onBack: () -> Unit,
+) {
     val c = Rax.colors
-    AnimatedVisibility(status == PaneStatus.Reconnecting, enter = fadeIn(), exit = fadeOut()) {
+    val context = LocalContext.current
+    AnimatedVisibility(view == PaneView.Reconnecting, enter = fadeIn(), exit = fadeOut()) {
         Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.TopCenter) {
             Text(
                 stringResource(R.string.terminal_reconnecting),
@@ -322,27 +342,53 @@ private fun PaneOverlay(status: PaneStatus, onUseHere: () -> Unit, onBack: () ->
             )
         }
     }
-    val message = when (status) {
-        PaneStatus.Opening -> null
-        PaneStatus.ElsewhereOwned -> R.string.terminal_elsewhere
-        PaneStatus.Closed -> R.string.terminal_closed
-        PaneStatus.Unavailable -> R.string.terminal_unavailable
-        else -> null
-    }
-    if (message != null) {
-        Box(Modifier.fillMaxSize().background(c.page.copy(alpha = 0.86f)), contentAlignment = Alignment.Center) {
-            Column(
-                Modifier.padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text(stringResource(message), style = RaxType.body, color = c.text)
-                if (status == PaneStatus.ElsewhereOwned) {
-                    PrimaryButton(stringResource(R.string.terminal_use_here), onUseHere, Modifier.padding(horizontal = 24.dp))
-                } else {
-                    PrimaryButton(stringResource(R.string.back), onBack, Modifier.padding(horizontal = 24.dp))
-                }
+    when (view) {
+        is PaneView.Loading -> {
+            val label = when {
+                view.connecting -> stringResource(R.string.terminal_connecting, hostName)
+                view.bytes >= 512 * 1024 -> stringResource(R.string.terminal_loading_size, Formatter.formatShortFileSize(context, view.bytes))
+                else -> stringResource(R.string.terminal_loading)
             }
+            Column(
+                Modifier.fillMaxSize().padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            ) {
+                CircularProgressIndicator(Modifier.size(28.dp), color = c.textSecondary, strokeWidth = 2.5.dp)
+                Text(label, style = RaxType.footnote, color = c.textSecondary, textAlign = TextAlign.Center)
+            }
+        }
+        is PaneView.Failed -> Message(view.message, hasScreen) {
+            if (view.canRetry) PrimaryButton(stringResource(R.string.link_retry), onRetry, Modifier.padding(horizontal = 24.dp))
+        }
+        PaneView.ElsewhereOwned -> Message(stringResource(R.string.terminal_elsewhere), hasScreen) {
+            PrimaryButton(stringResource(R.string.terminal_use_here), onUseHere, Modifier.padding(horizontal = 24.dp))
+        }
+        PaneView.Closed -> Message(stringResource(R.string.terminal_closed), hasScreen) {
+            PrimaryButton(stringResource(R.string.back), onBack, Modifier.padding(horizontal = 24.dp))
+        }
+        PaneView.Unavailable -> Message(stringResource(R.string.terminal_unavailable), hasScreen) {
+            PrimaryButton(stringResource(R.string.back), onBack, Modifier.padding(horizontal = 24.dp))
+        }
+        PaneView.Live, PaneView.Reconnecting -> Unit
+    }
+}
+
+/** A message in the middle of the terminal area. It dims the screen behind it, if there is one. */
+@Composable
+private fun Message(text: String, hasScreen: Boolean, action: @Composable () -> Unit) {
+    val c = Rax.colors
+    Box(
+        Modifier.fillMaxSize().then(if (hasScreen) Modifier.background(c.page.copy(alpha = 0.86f)) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier.padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(text, style = RaxType.body, color = c.text, textAlign = TextAlign.Center)
+            action()
         }
     }
 }
