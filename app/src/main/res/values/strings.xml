@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Rax</string>
+
+    <string name="back">Back</string>
+    <string name="close">Close</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="copy">Copy</string>
+    <string name="copied">Copied</string>
+    <string name="rename">Rename</string>
+
+    <string name="home_title">Sessions</string>
+    <string name="welcome_title">Connect to Rex</string>
+    <string name="add_host">Add host</string>
+    <string name="home_waiting">Needs you</string>
+    <string name="collapse">Collapse</string>
+    <string name="expand">Expand</string>
+    <plurals name="tab_count">
+        <item quantity="one">%d tab</item>
+        <item quantity="other">%d tabs</item>
+    </plurals>
+    <string name="link_online">Online</string>
+    <string name="link_online_tailnet">Online through Tailscale</string>
+    <string name="link_connecting">Connecting…</string>
+    <string name="link_retry">Retry</string>
+    <string name="link_needs_tailnet">Tailscale is signed out</string>
+    <string name="link_sign_in">Sign in</string>
+    <string name="link_needs_local_network">Local network access is off</string>
+    <string name="link_allow">Allow</string>
+    <string name="host_server">Rex</string>
+    <string name="host_server_version">Version</string>
+    <string name="host_server_newer">This Rex is newer than Rax. Everything Rax shows works, and a Rax update can add what is new.</string>
+    <string name="channel_alerts">Programs that need you</string>
+    <string name="channel_service">Background connection</string>
+    <string name="service_title">Background alerts are on</string>
+    <string name="service_text">Rax tells you when a program needs you.</string>
+    <string name="tailscale_title">Tailscale</string>
+    <string name="tailscale_signed_out">Signed out</string>
+    <string name="tailscale_starting">Starting…</string>
+    <string name="tailscale_sign_in">Sign in to Tailscale</string>
+    <string name="tailscale_about">Rax joins your tailnet as a device of its own. Only Rax uses it, so the phone needs no VPN.</string>
+    <string name="tailscale_waiting_approval">Waiting for approval</string>
+    <string name="tailscale_approval_footnote">An admin of your tailnet must approve this phone in the Tailscale admin console.</string>
+    <string name="tailscale_tailnet">Tailnet</string>
+    <string name="tailscale_this_phone">This phone</string>
+    <string name="tailscale_rex">Rex on your tailnet</string>
+    <string name="tailscale_looking">Looking for Rex…</string>
+    <string name="tailscale_no_rex">No Rex found</string>
+    <string name="tailscale_no_rex_footnote">On the computer, run rex server tailscale on and sign in with the same Tailscale account.</string>
+    <string name="tailscale_added">Added</string>
+    <string name="tailscale_sign_out">Sign out</string>
+    <string name="tailscale_sign_out_title">Sign out of Tailscale?</string>
+    <string name="tailscale_sign_out_body">Rax leaves your tailnet, and hosts that go through Tailscale stop working until you sign in again.</string>
+    <string name="host_menu">More for %1$s</string>
+    <string name="host_edit">Edit host</string>
+    <string name="session_new">New session</string>
+
+    <string name="tab_fallback">Tab %1$d</string>
+    <string name="program_in">%1$s in %2$s</string>
+    <string name="status_working">Working</string>
+    <string name="waiting_permission">Waiting for permission</string>
+    <string name="waiting_question">Has a question</string>
+    <string name="waiting_auth">Needs a password or sign-in</string>
+    <string name="waiting_generic">Waiting for you</string>
+
+    <string name="problem_unreachable">Can’t reach Rex at this address</string>
+    <string name="problem_unreachable_tailnet">Can’t reach this computer on your tailnet</string>
+    <string name="problem_tls">The secure connection failed</string>
+    <string name="problem_refused">Rex turned this phone away</string>
+    <string name="problem_refused_tailnet">Rex lets in only the Tailscale account that owns it</string>
+    <string name="problem_not_rex">That address is not a Rex server</string>
+    <string name="problem_update_rex">Update Rex on this computer to use it with Rax</string>
+    <string name="problem_update_rax">Update Rax to use this version of Rex</string>
+    <string name="problem_closed">The connection closed</string>
+    <string name="problem_tailnet_approval">Waiting for an admin of your tailnet to approve this phone</string>
+    <string name="problem_tailnet_failed">Tailscale didn’t start</string>
+
+    <string name="terminal_switch_tab">Switch tab</string>
+    <string name="terminal_actions">Pane, tab and session actions</string>
+    <string name="terminal_reconnecting">Reconnecting…</string>
+    <string name="terminal_elsewhere">This pane is in use on another device.</string>
+    <string name="terminal_use_here">Use here</string>
+    <string name="terminal_closed">This pane closed.</string>
+    <string name="terminal_unavailable">This computer is not connected.</string>
+
+    <string name="key_left">Left</string>
+    <string name="key_right">Right</string>
+    <string name="key_up">Up</string>
+    <string name="key_down">Down</string>
+    <string name="key_enter">Return</string>
+    <string name="key_more">More keys</string>
+    <string name="key_paste">paste</string>
+    <string name="key_show_keyboard">Show keyboard</string>
+    <string name="key_hide_keyboard">Hide keyboard</string>
+
+    <string name="action_group_pane">Pane</string>
+    <string name="action_group_tab">Tab</string>
+    <string name="action_group_session">Session</string>
+    <string name="action_split_right">Split right</string>
+    <string name="action_split_down">Split down</string>
+    <string name="action_rename_pane">Rename pane</string>
+    <string name="action_close_pane">Close pane</string>
+    <string name="action_new_tab">New tab</string>
+    <string name="action_rename_tab">Rename tab</string>
+    <string name="action_close_tab">Close tab</string>
+    <string name="action_rename_session">Rename session</string>
+    <string name="action_end_session">End session</string>
+    <string name="confirm_close_pane">Close %1$s?</string>
+    <string name="confirm_close_body">The program running in it stops.</string>
+    <string name="confirm_close_tab">Close %1$s?</string>
+    <string name="confirm_close_tab_body">Every pane in this tab closes, and the programs in them stop.</string>
+    <string name="confirm_end_session">End %1$s?</string>
+    <string name="confirm_end_session_body">Every tab in this session closes on the computer too, and the programs in them stop.</string>
+
+    <string name="host_name">Name</string>
+    <string name="host_name_placeholder">devbox</string>
+    <string name="host_address">Address</string>
+    <string name="host_address_placeholder">192.168.1.20:7297</string>
+    <string name="host_route">Connection</string>
+    <string name="host_tailnet">Through Tailscale</string>
+    <string name="host_tailnet_footnote">Rax joins your tailnet by itself. The rest of the phone stays off it.</string>
+    <string name="host_summary_plain">Connects to %1$s without encryption, so use it only on a network you trust.</string>
+    <string name="host_summary_tls">Connects to %1$s with TLS.</string>
+    <string name="host_summary_tailnet">Connects to %1$s through Tailscale.</string>
+    <string name="host_invalid_scheme">Use an address such as 192.168.1.20:7297 or a URL that starts with http, https, ws or wss.</string>
+    <string name="host_invalid_address">That is not an address Rax can connect to.</string>
+    <string name="host_delete">Delete host</string>
+    <string name="host_delete_title">Delete %1$s?</string>
+    <string name="host_delete_body">Rax forgets this computer. Its sessions keep running in Rex.</string>
+
+    <string name="welcome_body">Your sessions stay on your computer. Rax opens them over your network or your tailnet.</string>
+    <string name="welcome_lan_title">On the same network</string>
+    <string name="welcome_lan_body">Start Rex with a port the phone can reach:</string>
+    <string name="welcome_lan_warning">Anyone who can reach that port can use this Rex. Use it only on a network you trust.</string>
+    <string name="welcome_tailnet_title">Over Tailscale</string>
+    <string name="welcome_tailnet_body">Turn on Tailscale in Rex on the computer, then add it here. Rax joins your tailnet by itself, so the phone needs no VPN.</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_hosts">Hosts</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_connection">Connection</string>
+    <string name="settings_background_alerts">Background alerts</string>
+    <string name="settings_background_alerts_footnote">Stays connected while Rax is in the background, and notifies you when a program waits for permission, an answer or a sign-in.</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+
+    <string name="theme_title">Theme</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_light">Light</string>
+    <string name="appearance_automatic">Automatic</string>
+    <string name="appearance_light">Light</string>
+    <string name="appearance_dark">Dark</string>
+
+    <string name="font_title">Terminal font</string>
+    <string name="font_value">%1$s, %2$d</string>
+    <string name="font_bundled">Fonts</string>
+    <string name="font_imported">Added by you</string>
+    <string name="font_add">Add font file</string>
+    <string name="font_remove">Remove</string>
+    <string name="font_add_footnote">TrueType or OpenType files. Pick the regular, bold and italic files together to get all styles. SF Mono is in Terminal.app on a Mac.</string>
+    <string name="font_error_not_font">That file is not a font.</string>
+    <string name="font_error_proportional">That font is not monospaced, so its letters cannot line up in a terminal.</string>
+    <string name="font_error_unreadable">That file could not be read.</string>
+
+    <string name="acknowledgements_title">Acknowledgements</string>
+    <string name="acknowledgements_themes">Themes</string>
+    <string name="acknowledgements_software">Software</string>
+    <string name="acknowledgements_fonts">Fonts</string>
+</resources>

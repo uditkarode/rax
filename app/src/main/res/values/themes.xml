@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Rax" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <style name="Theme.Rax.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/page</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_mark</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/launcher_background</item>
+        <item name="postSplashScreenTheme">@style/Theme.Rax</item>
+    </style>
+</resources>

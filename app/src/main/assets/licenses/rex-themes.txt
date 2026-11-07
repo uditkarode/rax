@@ -1,0 +1,5 @@
+The colour themes are the ones Rex ships for macOS. tools/rex-themes.py converts them from the
+copy inside Rex.app into assets/themes/rex-themes.json, keeping each theme's terminal colours,
+its 256-colour palette and its interface colours.
+
+Rex is made by Superlogical.

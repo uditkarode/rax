@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <!-- The tailnet node's keys and imported fonts stay on this phone. -->
+    <cloud-backup>
+        <exclude domain="file" path="tailnet" />
+        <exclude domain="file" path="fonts" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="tailnet" />
+    </device-transfer>
+</data-extraction-rules>
