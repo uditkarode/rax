@@ -64,8 +64,8 @@ class ThemeCatalog(val themes: List<RexTheme>) {
 
     companion object {
         /** Rex's own defaults, so the phone matches a Mac that was never changed. */
-        const val DEFAULT_DARK = "silver-point-dark"
-        const val DEFAULT_LIGHT = "silver-point-light"
+        const val DEFAULT_DARK = "abyssal-trench"
+        const val DEFAULT_LIGHT = "porcelain-morning"
 
         private val json = Json { ignoreUnknownKeys = true }
 
