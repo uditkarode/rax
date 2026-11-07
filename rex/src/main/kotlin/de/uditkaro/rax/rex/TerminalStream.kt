@@ -14,8 +14,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -228,6 +230,7 @@ class TerminalStream(
 class PaneInput(private val host: RexHost, private val sessionId: String, private val blockId: String, scope: CoroutineScope) {
     private val queue = Channel<ByteArray>(Channel.UNLIMITED)
     private val sizes = Channel<Size>(Channel.CONFLATED)
+    private val themes = Channel<PaneTheme>(Channel.CONFLATED)
 
     private data class Size(val columns: Int, val rows: Int, val cellWidth: Int, val cellHeight: Int)
 
@@ -259,6 +262,20 @@ class PaneInput(private val host: RexHost, private val sessionId: String, privat
                 }
             }
         }
+        scope.launch {
+            for (theme in themes) {
+                host.client.state.first { it is RexClient.State.Connected }
+                runCatching {
+                    host.client.callBlock(sessionId, blockId, "set_theme", buildJsonObject {
+                        put("foreground", theme.foreground)
+                        put("background", theme.background)
+                        put("cursor", theme.cursor)
+                        putJsonArray("palette") { theme.palette.forEachIndexed { i, color -> add("$i=$color") } }
+                        put("scheme", if (theme.dark) "dark" else "light")
+                    })
+                }
+            }
+        }
     }
 
     fun send(bytes: ByteArray) {
@@ -270,8 +287,26 @@ class PaneInput(private val host: RexHost, private val sessionId: String, privat
         sizes.trySend(Size(columns, rows, cellWidth, cellHeight))
     }
 
+    /**
+     * Gives the pane the phone's colours. Rex answers programs that ask for the terminal's colours,
+     * or whether it is light or dark, with them while this client owns the pane.
+     */
+    fun setTheme(theme: PaneTheme) {
+        themes.trySend(theme)
+    }
+
     fun close() {
         queue.close()
         sizes.close()
+        themes.close()
     }
 }
+
+/** A pane's default colours as `#rrggbb`, with the 256-colour palette in index order. */
+data class PaneTheme(
+    val foreground: String,
+    val background: String,
+    val cursor: String,
+    val palette: List<String>,
+    val dark: Boolean,
+)

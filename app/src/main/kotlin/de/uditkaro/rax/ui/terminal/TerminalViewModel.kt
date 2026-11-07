@@ -10,6 +10,7 @@ import de.uditkaro.rax.connection.LiveHost
 import de.uditkaro.rax.graph
 import de.uditkaro.rax.rex.HostState
 import de.uditkaro.rax.rex.PaneInput
+import de.uditkaro.rax.rex.PaneTheme
 import de.uditkaro.rax.rex.RexClient
 import de.uditkaro.rax.rex.TerminalStream
 import de.uditkaro.rax.rex.WindowView
@@ -109,6 +110,7 @@ class TerminalViewModel(
 
     private var streamJob: Job? = null
     private var input: PaneInput? = null
+    @Volatile private var theme: PaneTheme? = null
     private var visible = true
     private val feeding = ThreadLocal<Boolean>()
 
@@ -220,6 +222,7 @@ class TerminalViewModel(
         lastProgress = SystemClock.elapsedRealtime()
         val paneInput = PaneInput(rex, sessionId, target.blockId, viewModelScope)
         input = paneInput
+        theme?.let(paneInput::setTheme)
         streamJob = viewModelScope.launch(terminalThread) {
             TerminalStream(rex, sessionId, target.blockId).events().collect { e -> onStreamEvent(e, target, paneInput) }
         }
@@ -240,6 +243,8 @@ class TerminalViewModel(
                 }
                 val session = restored ?: GhosttyTerminalSession(ctx, options())
                 session.transport = transport(target, paneInput)
+                // A new data connection can come from a new client, which starts with Rex's colours.
+                theme?.let(paneInput::setTheme)
                 try {
                     withContext(Dispatchers.Main) {
                         val old = _session.value
@@ -294,6 +299,11 @@ class TerminalViewModel(
         }.getOrNull() ?: return
         val content = reply["content"]?.jsonPrimitive?.contentOrNull ?: return
         if (_session.value === session) feed(content.toByteArray())
+    }
+
+    fun setTheme(theme: PaneTheme) {
+        this.theme = theme
+        input?.setTheme(theme)
     }
 
     private fun options() = GhosttyTerminalSession.Options(reportedVersion = "Rax", terminfoName = "xterm-256color")

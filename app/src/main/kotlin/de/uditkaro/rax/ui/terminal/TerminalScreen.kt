@@ -34,6 +34,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,6 +87,7 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
     val view by vm.view.collectAsStateWithLifecycle()
     val s = settings ?: return
     val theme = activeTheme(s, themes ?: return)
+    LaunchedEffect(vm, theme) { vm.setTheme(theme.terminal.toPane(theme.dark)) }
     val typeface = rememberTerminalTypeface(graph, s.fontId)
     val terminalState = rememberGhosttyTerminalState()
     val scope = rememberCoroutineScope()

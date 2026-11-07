@@ -39,6 +39,11 @@ a time and can switch panes.
   Rex's own terminal already replied.
 - When the view's grid changes, it calls `sendResize`. Rax sends the size, and if the pane is
   visible and not owned elsewhere, it asks to own the pane.
+- Rax sends the active terminal colours and whether the theme is light or dark with `set_theme`
+  when a pane opens, on each new data connection, and when the theme changes. Like the size, Rex
+  applies them while the phone owns the pane, and answers programs that ask for the background
+  colour or the colour scheme with them. Programs such as Codex and Neovim ask once at start, so
+  one started before the phone owned the pane keeps the colours it got then.
 
 ## Ownership timing
 
