@@ -66,6 +66,17 @@ keyPassword=…
 
 Without it, `assembleRelease` signs with the debug key.
 
+Each push to `main` runs the tests, builds a signed release APK and publishes it as a prerelease
+named `preview-N`. The workflow is in `.github/workflows/preview.yml`, and it reads the key from
+these repository secrets:
+
+| Secret | Value |
+|---|---|
+| `RELEASE_KEYSTORE_BASE64` | The keystore file, base64-encoded |
+| `RELEASE_KEYSTORE_PASSWORD` | The keystore password |
+| `RELEASE_KEY_ALIAS` | The key alias |
+| `RELEASE_KEY_PASSWORD` | The key password |
+
 ## Tests
 
 ```

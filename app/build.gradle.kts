@@ -19,8 +19,9 @@ android {
         applicationId = "de.uditkaro.rax"
         minSdk = 33
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        // CI sets these for preview builds.
+        versionCode = providers.gradleProperty("rax.versionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("rax.versionName").orNull ?: "1.0.0"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -62,6 +63,13 @@ android {
 
     androidResources {
         generateLocaleConfig = true
+        // Rax is in English only, so the translations inside libraries are left out.
+        localeFilters += "en"
+    }
+
+    dependenciesInfo {
+        // The dependency list in the signing block is for Google Play.
+        includeInApk = false
     }
 
     packaging {
