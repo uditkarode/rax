@@ -1,5 +1,6 @@
 package de.uditkaro.rax.ui.home
 
+import androidx.annotation.DrawableRes
 import androidx.compose.runtime.Immutable
 import de.uditkaro.rax.data.Host
 import de.uditkaro.rax.tailnet.TailnetStatus
@@ -55,5 +56,6 @@ data class TabRow(
     val detail: String?,
     val program: ProgramKind,
     val programName: String,
+    @DrawableRes val icon: Int?,
     val waiting: Boolean,
 )

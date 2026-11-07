@@ -33,6 +33,7 @@ private val software = listOf(
     Credit("Kotlin and kotlinx", "Apache-2.0", "licenses/apache-2.0.txt"),
     Credit("Android Jetpack", "Apache-2.0", "licenses/apache-2.0.txt"),
     Credit("Material Symbols", "Apache-2.0", "licenses/apache-2.0.txt"),
+    Credit("Simple Icons", "CC0-1.0", "licenses/simple-icons.txt"),
 )
 
 @Composable

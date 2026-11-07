@@ -245,7 +245,7 @@ private fun SessionGroupView(session: SessionGroup, actions: HomeActions) {
 private fun TabRowView(tab: TabRow, onOpen: (TabRow) -> Unit, showSession: Boolean) {
     val c = Rax.colors
     RowBase(onClick = { onOpen(tab) }) {
-        ProgramGlyph(tab.program, tab.programName)
+        ProgramGlyph(tab.program, tab.programName, tab.icon)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(

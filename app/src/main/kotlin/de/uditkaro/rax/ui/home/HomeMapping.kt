@@ -1,10 +1,12 @@
 package de.uditkaro.rax.ui.home
 
 import android.content.res.Resources
+import androidx.annotation.DrawableRes
 import de.uditkaro.rax.R
 import de.uditkaro.rax.data.Host
 import de.uditkaro.rax.rex.BlockFacts
 import de.uditkaro.rax.rex.HostState
+import de.uditkaro.rax.rex.ProcessInfo
 import de.uditkaro.rax.rex.Problem
 import de.uditkaro.rax.rex.ProgramRecord
 import de.uditkaro.rax.rex.RexClient
@@ -40,6 +42,63 @@ private val appNames = mapOf(
 
 /** The name people know a program by, for the IDs programs report about themselves. */
 fun appName(id: String): String = appNames[id.lowercase()] ?: id
+
+private val programIcons = mapOf(
+    "claude" to R.drawable.ic_program_claude, "claude-code" to R.drawable.ic_program_claude,
+    "gemini" to R.drawable.ic_program_googlegemini, "copilot" to R.drawable.ic_program_githubcopilot,
+    "cursor" to R.drawable.ic_program_cursor, "cursor-agent" to R.drawable.ic_program_cursor,
+    "opencode" to R.drawable.ic_program_opencode, "qwen" to R.drawable.ic_program_qwen,
+    "cline" to R.drawable.ic_program_cline, "windsurf" to R.drawable.ic_program_windsurf,
+    "nvim" to R.drawable.ic_program_neovim, "vim" to R.drawable.ic_program_vim, "vi" to R.drawable.ic_program_vim,
+    "emacs" to R.drawable.ic_program_gnuemacs, "hx" to R.drawable.ic_program_helix, "helix" to R.drawable.ic_program_helix,
+    "zsh" to R.drawable.ic_program_zsh, "bash" to R.drawable.ic_program_gnubash,
+    "fish" to R.drawable.ic_program_fishshell, "nu" to R.drawable.ic_program_nushell,
+    "git" to R.drawable.ic_program_git, "gh" to R.drawable.ic_program_github, "glab" to R.drawable.ic_program_gitlab,
+    "docker" to R.drawable.ic_program_docker, "docker-compose" to R.drawable.ic_program_docker,
+    "podman" to R.drawable.ic_program_podman, "kubectl" to R.drawable.ic_program_kubernetes,
+    "helm" to R.drawable.ic_program_helm, "terraform" to R.drawable.ic_program_terraform,
+    "ansible" to R.drawable.ic_program_ansible, "ansible-playbook" to R.drawable.ic_program_ansible,
+    "nix" to R.drawable.ic_program_nixos, "nix-shell" to R.drawable.ic_program_nixos,
+    "nixos-rebuild" to R.drawable.ic_program_nixos, "brew" to R.drawable.ic_program_homebrew,
+    "python" to R.drawable.ic_program_python, "ipython" to R.drawable.ic_program_python, "pip" to R.drawable.ic_program_python,
+    "uv" to R.drawable.ic_program_uv, "uvx" to R.drawable.ic_program_uv, "pytest" to R.drawable.ic_program_pytest,
+    "jupyter" to R.drawable.ic_program_jupyter, "jupyter-lab" to R.drawable.ic_program_jupyter,
+    "node" to R.drawable.ic_program_nodedotjs, "npm" to R.drawable.ic_program_npm, "npx" to R.drawable.ic_program_npm,
+    "pnpm" to R.drawable.ic_program_pnpm, "yarn" to R.drawable.ic_program_yarn,
+    "bun" to R.drawable.ic_program_bun, "bunx" to R.drawable.ic_program_bun, "deno" to R.drawable.ic_program_deno,
+    "tsc" to R.drawable.ic_program_typescript, "vite" to R.drawable.ic_program_vite,
+    "vitest" to R.drawable.ic_program_vitest, "jest" to R.drawable.ic_program_jest,
+    "cargo" to R.drawable.ic_program_rust, "rustc" to R.drawable.ic_program_rust, "rustup" to R.drawable.ic_program_rust,
+    "go" to R.drawable.ic_program_go, "swift" to R.drawable.ic_program_swift, "xcodebuild" to R.drawable.ic_program_xcode,
+    "zig" to R.drawable.ic_program_zig, "ruby" to R.drawable.ic_program_ruby, "irb" to R.drawable.ic_program_ruby,
+    "bundle" to R.drawable.ic_program_ruby, "php" to R.drawable.ic_program_php,
+    "elixir" to R.drawable.ic_program_elixir, "iex" to R.drawable.ic_program_elixir, "mix" to R.drawable.ic_program_elixir,
+    "dart" to R.drawable.ic_program_dart, "flutter" to R.drawable.ic_program_flutter, "julia" to R.drawable.ic_program_julia,
+    "lua" to R.drawable.ic_program_lua, "luajit" to R.drawable.ic_program_lua,
+    "kotlin" to R.drawable.ic_program_kotlin, "kotlinc" to R.drawable.ic_program_kotlin,
+    "gradle" to R.drawable.ic_program_gradle, "gradlew" to R.drawable.ic_program_gradle,
+    "bazel" to R.drawable.ic_program_bazel, "bazelisk" to R.drawable.ic_program_bazel, "cmake" to R.drawable.ic_program_cmake,
+    "psql" to R.drawable.ic_program_postgresql, "postgres" to R.drawable.ic_program_postgresql,
+    "mysql" to R.drawable.ic_program_mysql, "mongosh" to R.drawable.ic_program_mongodb, "mongod" to R.drawable.ic_program_mongodb,
+    "redis-cli" to R.drawable.ic_program_redis, "redis-server" to R.drawable.ic_program_redis,
+    "sqlite" to R.drawable.ic_program_sqlite, "duckdb" to R.drawable.ic_program_duckdb,
+    "ollama" to R.drawable.ic_program_ollama, "nginx" to R.drawable.ic_program_nginx, "curl" to R.drawable.ic_program_curl,
+    "htop" to R.drawable.ic_program_htop, "tmux" to R.drawable.ic_program_tmux,
+)
+
+/**
+ * The logo for a pane: the agent's own ID first, then the names of its process. A version at the
+ * end of a name is ignored, so `python3.12` gets the Python logo.
+ */
+@DrawableRes
+fun programIcon(app: String?, process: ProcessInfo?): Int? {
+    val names = listOfNotNull(app, process?.label, process?.argv0?.removePrefix("-")?.substringAfterLast('/'), process?.name)
+    for (name in names.map { it.lowercase() }) {
+        programIcons[name]?.let { return it }
+        programIcons[name.trimEnd { it.isDigit() || it == '.' }]?.let { return it }
+    }
+    return null
+}
 
 fun shortPath(path: String?, home: String?): String? {
     if (path.isNullOrBlank()) return null
@@ -91,7 +150,8 @@ fun tabRow(
     val program = facts?.programName
     val kind = programKind(program, facts)
     val customLabel = window.label?.takeIf { it.isNotBlank() && !defaultWindowLabel.matches(it) }
-    val agentName = facts?.status?.values?.firstNotNullOfOrNull { it.effectiveApp ?: it.app }?.let(::appName)
+    val app = facts?.status?.values?.firstNotNullOfOrNull { it.effectiveApp ?: it.app }
+    val agentName = app?.let(::appName)
     val title = customLabel
         ?: (if (kind != ProgramKind.Shell) facts?.title?.takeIf { it.isNotBlank() } else null)
         ?: agentName
@@ -117,6 +177,7 @@ fun tabRow(
         detail = detail,
         program = kind,
         programName = agentName ?: program ?: title,
+        icon = programIcon(app, facts?.process?.foreground ?: facts?.process?.child),
         waiting = waiting != null,
     )
 }

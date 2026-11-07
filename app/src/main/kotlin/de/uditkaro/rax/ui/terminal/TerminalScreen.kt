@@ -126,7 +126,7 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
         TopBar(
             title = tab?.title ?: sessionState?.info?.label.orEmpty(),
             subtitle = listOfNotNull(sessionState?.info?.label, shortPath(facts?.cwd, facts?.process?.home)).joinToString("  ·  "),
-            glyph = { tab?.let { ProgramGlyph(it.program, it.programName, size = 30.dp) } },
+            glyph = { tab?.let { ProgramGlyph(it.program, it.programName, it.icon, size = 30.dp) } },
             host = host,
             vm = vm,
             currentWindowId = target?.windowId,
@@ -267,7 +267,7 @@ private fun TopBar(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         },
-                        leadingIcon = { ProgramGlyph(row.program, row.programName, size = 24.dp) },
+                        leadingIcon = { ProgramGlyph(row.program, row.programName, row.icon, size = 24.dp) },
                         onClick = {
                             tabs = false
                             val block = w.primaryBlockId ?: return@DropdownMenuItem
