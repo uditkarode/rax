@@ -1,7 +1,6 @@
 # Rax
 
-Rax is an Android app for [Rex](https://www.superlogical.com/rex), the terminal multiplexer for
-Mac. It shows the sessions and tabs running in Rex on your computers, and opens any of them as a
+Rax is an Android app for [Rex](https://www.superlogical.com/rex), the terminal multiplexer. It shows the sessions and tabs running in Rex on your computers, and opens any of them as a
 live terminal on your phone.
 
 <p>
