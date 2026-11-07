@@ -60,3 +60,17 @@ explicit address. Everything below uses the isolated server.
 - A pane opened again right after it was left: go back and open it again within a second, which
   makes Rex reject the new data connection with reason `0x02` for a moment.
 - A force quit: `adb shell am force-stop de.uditkaro.rax.debug`, then open the same pane again.
+
+## README screenshots
+
+- Start the isolated server with `HOME` set to a demo directory under `/private/tmp`, with a
+  `.zshrc` that sets a plain prompt. Directories then show as `~/code/...`, and no real paths or
+  names appear. Set `REX_BIN` too, because the script finds Rex through `$HOME`.
+- A program makes its tab wait for the user by printing OSC 7501 with `state=blocked` (see
+  `docs/rex-protocol.md`).
+- For a clean status bar, use SystemUI demo mode: `settings put global sysui_demo_allowed 1`, then
+  `am broadcast -a com.android.systemui.demo -e command <cmd>` with `enter`, `clock -e hhmm 0941`,
+  `notifications -e visible false` and `network -e mobile hide`. The emulator's "no screen lock"
+  notification still shows a shield, so snooze it with `cmd notification snooze`.
+- Encode with `cwebp -resize 720 0 -q 90 -m 6 -sharp_yuv`. Terminal text stays sharp, and each file
+  is about 25 to 90 KB.

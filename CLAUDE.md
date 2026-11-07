@@ -58,6 +58,29 @@ version in `tailnet/go/go.mod`. The first build also builds the Go library.
 The debug build has the application ID `de.uditkaro.rax.debug`, so it installs next to a release
 build.
 
+`LiveServerTest` in `:rex` runs only when `RAX_REX_URL` points at a Rex, which must be the isolated
+test server (`RAX_REX_URL=http://127.0.0.1:7297 ./gradlew :rex:test`).
+
+A release build signs with the key named in `keystore.properties` at the repository root:
+
+```
+storeFile=release.jks
+storePassword=…
+keyAlias=…
+keyPassword=…
+```
+
+Without the file, `assembleRelease` signs with the debug key. CI writes it from repository secrets,
+see `release-and-ci`.
+
+After Rex updates, run `tools/rex-probe/rex-schema.sh check` to see whether its API changed, see
+`rex-protocol`.
+
+## README
+
+The README is for people who might use Rax: what it is, screenshots, how to install and connect,
+and credits. Build, test, release and protocol details go here or in the skills.
+
 ## Commits
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
