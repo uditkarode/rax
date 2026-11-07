@@ -68,6 +68,13 @@ explicit address. Everything below uses the isolated server.
   names appear. Set `REX_BIN` too, because the script finds Rex through `$HOME`.
 - A program makes its tab wait for the user by printing OSC 7501 with `state=blocked` (see
   `docs/rex-protocol.md`).
+- Real agents in a pane need care, because they act on the computer and on Rex. Start them with
+  `env HOME=$HOME_OF_USER REX_SERVER=unix:///<probe dir>/rex.sock`, so they find their login and
+  any `rex` command they run reaches the isolated server. Run Codex with `--no-daemon`: by
+  default its commands run in a shared daemon with that daemon's environment, which can point at
+  the user's own Rex. Claude Code with `--setting-sources project --permission-mode default` skips
+  the user's hooks and stops at permission prompts. After the run, check that `rex ls` against
+  the user's server shows the same labels as before.
 - For a clean status bar, use SystemUI demo mode: `settings put global sysui_demo_allowed 1`, then
   `am broadcast -a com.android.systemui.demo -e command <cmd>` with `enter`, `clock -e hhmm 0941`,
   `notifications -e visible false` and `network -e mobile hide`. The emulator's "no screen lock"

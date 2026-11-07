@@ -34,6 +34,9 @@ start)
   mkdir -p "$BASE/state" "$BASE/run"
   chmod 700 "$BASE"
   : > "$BASE/init.lua"
+  # Panes inherit this environment. An agent that runs this script would otherwise pass its own
+  # session variables on, and an agent started in a pane would act as part of that session.
+  for v in $(env | sed -En 's/^((CLAUDE|CODEX)[A-Za-z0-9_]*)=.*/\1/p'); do unset "$v"; done
   exec env -u REX_SERVER -u REX_SESSION -u REX_BLOCK -u REX_CLIENT -u REX_CONFIG \
     REX_RUNTIME_DIR="$BASE/run" \
     "$REX" server run \
