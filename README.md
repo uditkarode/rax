@@ -5,20 +5,13 @@ Mac. It shows the sessions and tabs running in Rex on your computers, and opens 
 live terminal on your phone.
 
 <p>
-  <img src="docs/screenshots/home.webp" width="260" alt="Sessions on a computer, with a tab that waits for an answer at the top">
-  <img src="docs/screenshots/terminal.webp" width="260" alt="Neovim in a pane">
-  <img src="docs/screenshots/keyboard.webp" width="260" alt="Answering a prompt with the keyboard and the extra key row">
+  <img src="docs/screenshots/home.webp" width="260" alt="Sessions on a computer, with Claude Code waiting for permission at the top">
+  <img src="docs/screenshots/terminal.webp" width="260" alt="Claude Code asking for permission in a pane">
+  <img src="docs/screenshots/keyboard.webp" width="260" alt="Typing to Codex with the keyboard and the extra key row">
 </p>
 
-- See every session and tab on each computer you add, and what runs in each one.
-- Open a pane as a full terminal. A key row above the keyboard gives you Esc, Ctrl, Alt, Tab and
-  the arrows.
-- Programs that wait for you, such as a coding agent asking for permission, show at the top. With
-  background alerts on, they also come as notifications.
-- Split, rename and close panes, tabs and sessions.
-- Rax can run its own Tailscale node, so it reaches your computers over Tailscale while the rest of
-  your phone stays off it. You don't need the Tailscale app.
-- Rex's color themes, light and dark, and 10 terminal fonts.
+- Rax runs its own Tailscale node, so your whole phone doesn't have to run a VPN.
+- We've also bundled all the familiar Rex themes straight from the official clients!
 
 ## Install
 
