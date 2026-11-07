@@ -46,5 +46,6 @@ Rex servers it finds, and you tap one to add it.
 
 Rax draws the terminal with [libghostty-android](https://github.com/SagerNet/libghostty-android)
 and [Ghostty](https://ghostty.org), connects over [Tailscale](https://github.com/tailscale/tailscale),
-and shows program logos from [Simple Icons](https://simpleicons.org). The color themes come from
+and shows program logos from [Simple Icons](https://simpleicons.org) and
+[Lobe Icons](https://github.com/lobehub/lobe-icons). The color themes come from
 Rex. Settings, then Acknowledgements, lists every license.

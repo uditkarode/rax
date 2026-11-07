@@ -1,41 +1,64 @@
 #!/usr/bin/env python3
-"""Turns Simple Icons SVGs into the ic_program_<slug> vector drawables.
+"""Turns 24x24 SVG logos into the ic_program_<name> vector drawables.
 
-Usage: program-icons.py <simple-icons>/icons <slug>...
-Get the icons with `npm pack simple-icons` and unpack the tarball.
+Usage: program-icons.py simple-icons|lobe-icons <icons-dir> <name>...
+
+Sources:
+  simple-icons  `npm pack simple-icons`, icons/<slug>.svg (CC0 1.0)
+  lobe-icons    `npm pack @lobehub/icons-static-svg`, icons/<name>.svg, the
+                monochrome files without -color or -text (MIT)
 """
 import pathlib
-import re
 import sys
+import xml.etree.ElementTree as ET
 
 OUT = pathlib.Path(__file__).resolve().parent.parent / "app/src/main/res/drawable"
-
-TEMPLATE = """<!-- {title}, from Simple Icons (CC0 1.0) -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FF000000"
-        android:pathData="{path}" />
-</vector>
-"""
+SVG = "{http://www.w3.org/2000/svg}"
+CREDITS = {"simple-icons": "Simple Icons (CC0 1.0)", "lobe-icons": "Lobe Icons (MIT)"}
 
 
-def main(icons: pathlib.Path, slugs: list[str]) -> None:
-    for slug in slugs:
-        svg = (icons / f"{slug}.svg").read_text()
-        if 'viewBox="0 0 24 24"' not in svg or svg.count("<path") != 1 or "fill-rule" in svg:
-            sys.exit(f"{slug}: not a single-path 24x24 icon")
-        title = re.search(r"<title>(.*?)</title>", svg).group(1)
-        path = re.search(r'<path d="([^"]+)"', svg).group(1)
-        name = "ic_program_" + slug.replace("-", "_")
-        (OUT / f"{name}.xml").write_text(TEMPLATE.format(title=title.replace("--", "-"), path=path))
-        print(name)
+def convert(svg_file: pathlib.Path, credit: str) -> str:
+    root = ET.parse(svg_file).getroot()
+    if root.get("viewBox") != "0 0 24 24":
+        raise ValueError("viewBox is not 0 0 24 24")
+    title = root.findtext(f"{SVG}title") or svg_file.stem
+    paths = []
+    for el in root.iter():
+        tag = el.tag.removeprefix(SVG)
+        if tag in ("svg", "title"):
+            continue
+        if tag != "path" or "transform" in el.attrib or el.get("fill") not in (None, "currentColor"):
+            raise ValueError(f"unsupported <{tag}>")
+        rule = el.get("fill-rule", root.get("fill-rule", "nonzero"))
+        fill_type = '\n        android:fillType="evenOdd"' if rule == "evenodd" else ""
+        paths.append(f'    <path\n        android:fillColor="#FF000000"{fill_type}\n        android:pathData="{el.get("d")}" />')
+    if not paths:
+        raise ValueError("no paths")
+    return (
+        f"<!-- {title.replace('--', '-')}, from {credit} -->\n"
+        '<vector xmlns:android="http://schemas.android.com/apk/res/android"\n'
+        '    android:width="24dp"\n'
+        '    android:height="24dp"\n'
+        '    android:viewportWidth="24"\n'
+        '    android:viewportHeight="24">\n'
+        + "\n".join(paths)
+        + "\n</vector>\n"
+    )
+
+
+def main(source: str, icons: pathlib.Path, names: list[str]) -> None:
+    credit = CREDITS[source]
+    for name in names:
+        try:
+            xml = convert(icons / f"{name}.svg", credit)
+        except ValueError as e:
+            sys.exit(f"{name}: {e}")
+        out = "ic_program_" + name.replace("-", "_")
+        (OUT / f"{out}.xml").write_text(xml)
+        print(out)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 4 or sys.argv[1] not in CREDITS:
         sys.exit(__doc__)
-    main(pathlib.Path(sys.argv[1]), sys.argv[2:])
+    main(sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3:])

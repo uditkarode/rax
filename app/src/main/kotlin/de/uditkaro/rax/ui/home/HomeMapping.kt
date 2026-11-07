@@ -18,7 +18,7 @@ private val shells = setOf("zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh", "
 private val editors = setOf("nvim", "vim", "vi", "nano", "emacs", "hx", "helix", "micro", "kak", "kakoune", "joe", "mg")
 private val agents = setOf(
     "claude", "claude-code", "codex", "gemini", "aider", "opencode", "amp", "goose", "crush", "pi",
-    "cursor-agent", "copilot", "qwen", "kiro", "droid", "auggie",
+    "cursor-agent", "copilot", "qwen", "kiro", "kiro-cli", "droid", "auggie",
 )
 private val defaultWindowLabel = Regex("^Window [0-9a-f]{8}$")
 
@@ -36,7 +36,7 @@ fun programKind(name: String?, facts: BlockFacts?): ProgramKind {
 private val appNames = mapOf(
     "claude" to "Claude Code", "claude-code" to "Claude Code", "codex" to "Codex", "gemini" to "Gemini CLI",
     "aider" to "Aider", "opencode" to "OpenCode", "amp" to "Amp", "goose" to "Goose", "crush" to "Crush",
-    "cursor-agent" to "Cursor Agent", "copilot" to "Copilot CLI", "qwen" to "Qwen Code", "kiro" to "Kiro",
+    "cursor-agent" to "Cursor Agent", "copilot" to "Copilot CLI", "qwen" to "Qwen Code", "kiro" to "Kiro", "kiro-cli" to "Kiro",
     "droid" to "Droid", "auggie" to "Auggie",
 )
 
@@ -45,6 +45,8 @@ fun appName(id: String): String = appNames[id.lowercase()] ?: id
 
 private val programIcons = mapOf(
     "claude" to R.drawable.ic_program_claude, "claude-code" to R.drawable.ic_program_claude,
+    "codex" to R.drawable.ic_program_codex, "amp" to R.drawable.ic_program_amp, "goose" to R.drawable.ic_program_goose,
+    "kiro" to R.drawable.ic_program_kiro, "kiro-cli" to R.drawable.ic_program_kiro,
     "gemini" to R.drawable.ic_program_googlegemini, "copilot" to R.drawable.ic_program_githubcopilot,
     "cursor" to R.drawable.ic_program_cursor, "cursor-agent" to R.drawable.ic_program_cursor,
     "opencode" to R.drawable.ic_program_opencode, "qwen" to R.drawable.ic_program_qwen,

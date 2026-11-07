@@ -63,8 +63,9 @@ as the commands on the welcome screen.
 spacing, touch targets and colours stay the same everywhere. Icons are Material Symbols vector
 drawables in `res/drawable`. Delete an icon when its last use goes.
 
-Program logos (`ic_program_*`) come from Simple Icons (CC0), converted with
-`tools/program-icons.py`. Rex.app has its own logo set, but those files belong to Superlogical.
+Program logos (`ic_program_*`) come from Simple Icons (CC0), and from Lobe Icons (MIT) for AI
+tools that Simple Icons lacks, such as Codex. `tools/program-icons.py` converts both. Rex.app has
+its own logo set, but those files belong to Superlogical.
 `programIcon` in `HomeMapping.kt` picks a logo from the agent's ID or the process names. A program
 without a logo gets the terminal icon if it is a shell, else its first letter.
 
