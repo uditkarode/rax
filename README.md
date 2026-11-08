@@ -21,7 +21,7 @@ Rax needs Android 10 or later. Future updates can use the in-app updater.
 
 ### On the same network
 
-Start Rex so the phone can reach it:
+Start Rex:
 
 ```bash
 rex server start --extra-listen :7297 --allow-anonymous
@@ -29,7 +29,7 @@ rex server start --extra-listen :7297 --allow-anonymous
 ```
 
 In Rax, add a host with the computer's address, for example `192.168.1.20:7297`. Anyone who can
-reach this port can use your Rex, so do this only on a network you trust.
+reach this port can access Rex, so do this only on a network you trust.
 
 ### Over Tailscale
 
@@ -40,8 +40,8 @@ rex server tailscale on
 # or from the GUI
 ```
 
-In Rax, open Settings → Tailscale, and sign in with the same Tailscale account. Rax lists the
-Rex servers it finds, and you tap one to add it.
+In Rax, open Settings → Tailscale, and sign in to Tailscale. You'll see listed the
+Rex servers it finds on your tailnet.
 
 If the Tailscale app already runs on your phone, turn on "Use the Tailscale app" there instead. Rax
 then reaches your tailnet through it. Add the computer as a host with its MagicDNS name, for
