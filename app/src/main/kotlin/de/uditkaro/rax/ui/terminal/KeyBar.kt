@@ -158,24 +158,28 @@ fun Key(
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
                     pressed = true
-                    haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
-                    val first = withTimeoutOrNull(LONG_PRESS_MS) { waitForRelease() }
-                    val h = hold
-                    when {
-                        first == Release.Up -> tap()
-                        first == Release.Cancelled -> Unit
-                        h != null -> {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            h()
-                            waitForRelease()
+                    // The key can turn off under the finger, which ends this gesture early.
+                    try {
+                        haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                        val first = withTimeoutOrNull(LONG_PRESS_MS) { waitForRelease() }
+                        val h = hold
+                        when {
+                            first == Release.Up -> tap()
+                            first == Release.Cancelled -> Unit
+                            h != null -> {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                h()
+                                waitForRelease()
+                            }
+                            repeat -> {
+                                tap()
+                                while (withTimeoutOrNull(REPEAT_MS) { waitForRelease() } == null) tap()
+                            }
+                            else -> if (waitForRelease() == Release.Up) tap()
                         }
-                        repeat -> {
-                            tap()
-                            while (withTimeoutOrNull(REPEAT_MS) { waitForRelease() } == null) tap()
-                        }
-                        else -> if (waitForRelease() == Release.Up) tap()
+                    } finally {
+                        pressed = false
                     }
-                    pressed = false
                 }
             } else Modifier)
             .padding(horizontal = padding),

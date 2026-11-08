@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import androidx.core.app.NotificationCompat
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import de.uditkaro.rax.MainActivity
 import de.uditkaro.rax.R
@@ -15,9 +17,11 @@ import de.uditkaro.rax.rex.Alert
 import de.uditkaro.rax.rex.Attach
 import de.uditkaro.rax.rex.HostState
 import de.uditkaro.rax.ui.home.appName
+import de.uditkaro.rax.ui.home.tabRow
 import de.uditkaro.rax.ui.home.waitingText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,7 +31,13 @@ import kotlinx.coroutines.withContext
  * the user, or a desktop notification a program sent. A waiting notification goes away by itself
  * once the program stops waiting.
  */
-class Alerts(private val app: Application, private val connections: Connections, scope: CoroutineScope) {
+class Alerts(
+    private val app: Application,
+    private val connections: Connections,
+    /** Whether background alerts are on; null until the settings are read. */
+    private val enabled: StateFlow<Boolean?>,
+    scope: CoroutineScope,
+) {
     private val manager = app.getSystemService(NotificationManager::class.java)
 
     /** Notifications shown for waiting programs, by host ID, so they can be withdrawn. */
@@ -56,28 +66,57 @@ class Alerts(private val app: Application, private val connections: Connections,
         scope.launch {
             connections.hosts.filterNotNull().collect { hosts -> withContext(Dispatchers.Main) { forgetRemoved(hosts) } }
         }
+        // A program that began to wait while Rax was open got no notification, so leaving Rax posts it.
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStop(owner: LifecycleOwner) = postWaiting()
+        })
+        // Without background alerts the connections stop, and nothing would take a waiting notification away.
+        scope.launch {
+            enabled.filterNotNull().collect { on -> if (!on) withContext(Dispatchers.Main) { withdrawAll() } }
+        }
     }
 
-    private fun post(host: Host, alert: Alert) {
+    private fun postWaiting() {
+        for (live in connections.live.value.values) {
+            for ((blockId, facts) in live.rex.state.value.blocks) {
+                val record = facts.waiting ?: continue
+                if (blockId in shown[live.host.id].orEmpty()) continue
+                post(live.host, Alert.Waiting(facts.sessionId, blockId, record), silent = true)
+            }
+        }
+    }
+
+    private fun post(host: Host, alert: Alert, silent: Boolean = false) {
+        if (enabled.value != true) return
         if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
         if (!manager.areNotificationsEnabled()) return
-        val state = connections.states.value[host.id]
+        val state = connections.get(host.id)?.rex?.state?.value
         val facts = state?.blocks?.get(alert.blockId)
+        // The program can stop waiting before its alert gets here, and then nothing would withdraw it.
+        if (alert is Alert.Waiting && facts?.waiting == null) return
         val program = facts?.status?.values?.firstNotNullOfOrNull { it.effectiveApp ?: it.app }?.let(::appName) ?: facts?.programName
+        val session = state?.session(alert.sessionId)
+        val sessionName = session?.info?.label.orEmpty()
+        // The tab's name as Home shows it, which tells apart several programs that wait.
+        val tabTitle = session?.view?.tabs?.withIndex()
+            ?.firstOrNull { (_, w) -> w.allBlocks.any { it.id == alert.blockId } }
+            ?.let { (i, w) -> tabRow(app.resources, host.id, alert.sessionId, sessionName, w, i, state?.blocks.orEmpty(), alert.blockId)?.title }
+        val name = tabTitle ?: program ?: host.name
         val (title, text) = when (alert) {
-            is Alert.Waiting -> (program ?: host.name) to waitingText(app.resources, alert.record)
-            is Alert.Notification -> alert.title.ifBlank { program ?: host.name } to alert.body
+            is Alert.Waiting -> name to waitingText(app.resources, alert.record)
+            is Alert.Notification -> alert.title.ifBlank { name } to alert.body
         }
         val notification = NotificationCompat.Builder(app, CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setSubText(host.name)
+            .setSubText(listOf(host.name, sessionName).filter { it.isNotBlank() }.joinToString(" · "))
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             // A pane that still waits after a restart or a reconnect is posted again; it sounds only the first time.
             .setOnlyAlertOnce(alert is Alert.Waiting)
+            .setSilent(silent)
             .setContentIntent(openPane(host, alert, state))
             .build()
         val tag = tag(host.id, alert.blockId)
@@ -102,6 +141,11 @@ class Alerts(private val app: Application, private val connections: Connections,
             done.forEach { manager.cancel(tag(hostId, it), ID_WAITING) }
             blocks -= done.toSet()
         }
+    }
+
+    private fun withdrawAll() {
+        for ((hostId, blocks) in shown) blocks.forEach { manager.cancel(tag(hostId, it), ID_WAITING) }
+        shown.clear()
     }
 
     /** Takes away the notifications of hosts the user removed. */

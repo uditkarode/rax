@@ -240,7 +240,7 @@ class GhosttyVtBridgeTest {
         var offset = 15 * 4
         repeat(row) {
             val textBytes = buffer.getInt(offset + 12) * 2
-            offset += (16 + cols * 16 + textBytes + 3) / 4 * 4
+            offset += (20 + cols * 16 + textBytes + 3) / 4 * 4
         }
         return offset
     }
@@ -343,10 +343,13 @@ class GhosttyVtBridgeTest {
 
     @Test
     fun paste() {
-        assertTrue(GhosttyVt.nativeIsPasteSafe("ls".toByteArray()))
-        assertFalse(GhosttyVt.nativeIsPasteSafe("rm -rf ~\n".toByteArray()))
+        assertTrue(GhosttyVt.nativeIsPasteSafe(handle, "ls".toByteArray()))
+        assertFalse(GhosttyVt.nativeIsPasteSafe(handle, "rm -rf ~\n".toByteArray()))
         assertEquals("ab\r", GhosttyVt.nativeEncodePaste(handle, "ab\n".toByteArray()).text())
         write("\u001b[?2004h")
+        // A bracketed paste reaches the program as one paste, so only an early end of it is unsafe.
+        assertTrue(GhosttyVt.nativeIsPasteSafe(handle, "rm -rf ~\n".toByteArray()))
+        assertFalse(GhosttyVt.nativeIsPasteSafe(handle, "a\u001b[201~rm -rf ~\n".toByteArray()))
         assertEquals("\u001b[200~ab\n\u001b[201~", GhosttyVt.nativeEncodePaste(handle, "ab\n".toByteArray()).text())
     }
 

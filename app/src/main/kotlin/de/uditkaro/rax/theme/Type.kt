@@ -64,6 +64,9 @@ object RaxType {
     /** Footnotes under a group, captions. */
     val footnote = style(13, 18, FontWeight.Normal)
 
+    /** A footnote that needs the user, such as what a waiting program asks for. */
+    val footnoteStrong = style(13, 18, FontWeight.SemiBold)
+
     val material = Typography(
         displayLarge = largeTitle, displayMedium = largeTitle, displaySmall = largeTitle,
         headlineLarge = largeTitle, headlineMedium = title, headlineSmall = title,

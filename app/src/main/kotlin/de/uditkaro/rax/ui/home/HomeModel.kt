@@ -42,9 +42,15 @@ enum class Need {
 
 /**
  * What the phone itself allows, which decides whether a host can be reached at all. [localNames]
- * says for each host name that was looked up whether it points into the local network.
+ * says for each host name that was looked up whether it points into the local network. [online]
+ * says whether the phone has a network.
  */
-data class Access(val tailnet: TailnetStatus, val localNetwork: Boolean, val localNames: Map<String, Boolean> = emptyMap())
+data class Access(
+    val tailnet: TailnetStatus,
+    val localNetwork: Boolean,
+    val localNames: Map<String, Boolean> = emptyMap(),
+    val online: Boolean = true,
+)
 
 @Immutable
 data class SessionGroup(val id: String, val name: String, val tabs: List<TabRow>)

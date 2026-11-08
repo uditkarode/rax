@@ -148,10 +148,19 @@ class MainActivity : ComponentActivity() {
 
     private fun paneOf(intent: Intent?): Screen.Terminal? {
         if (intent?.action != Alerts.ACTION_OPEN_PANE) return null
+        // Opening Rax from recents repeats the intent that started its task, which can be an old notification's.
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return null
         val host = intent.getStringExtra(Alerts.EXTRA_HOST) ?: return null
         val session = intent.getStringExtra(Alerts.EXTRA_SESSION) ?: return null
-        val window = intent.getStringExtra(Alerts.EXTRA_WINDOW) ?: return null
-        return Screen.Terminal(host, session, window, intent.getStringExtra(Alerts.EXTRA_BLOCK))
+        val block = intent.getStringExtra(Alerts.EXTRA_BLOCK)
+        // A notification can come before Rax knew the pane's tab.
+        val window = intent.getStringExtra(Alerts.EXTRA_WINDOW)
+            ?: block?.let { b ->
+                graph.connections.get(host)?.rex?.state?.value?.session(session)?.view?.tabs
+                    ?.firstOrNull { w -> w.allBlocks.any { it.id == b } }?.id
+            }
+            ?: return null
+        return Screen.Terminal(host, session, window, block)
     }
 
     /**

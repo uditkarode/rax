@@ -104,7 +104,8 @@ fun HostEditorScreen(
         backIcon = R.drawable.ic_close,
         backLabel = stringResource(R.string.close),
         actions = {
-            IconAction(R.drawable.ic_check, stringResource(R.string.save), save, tint = Rax.colors.link, enabled = canSave)
+            // Save with a wrong address shows what is wrong with it.
+            IconAction(R.drawable.ic_check, stringResource(R.string.save), save, tint = Rax.colors.link, enabled = address.isNotBlank())
         },
     ) {
         item(key = "fields") {

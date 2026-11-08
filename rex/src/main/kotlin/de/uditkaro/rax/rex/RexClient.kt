@@ -200,6 +200,19 @@ class RexClient(
     }
 
     /**
+     * Tells the client that the connection [welcome] opened works, once its owner has set it up. Only
+     * a drop after this starts the count of failed attempts again, so a connection that fails during
+     * setup each time shows as failing.
+     */
+    fun markWorking(welcome: Welcome) {
+        synchronized(lock) {
+            if ((_state.value as? State.Connected)?.welcome !== welcome) return
+            current?.working = true
+            failures = 0
+        }
+    }
+
+    /**
      * Ends the connection that [welcome] opened and lets the loop open a fresh one, after a setup call
      * failed half way. Does nothing once that connection is gone.
      */
@@ -298,12 +311,9 @@ class RexClient(
 
     /** Runs one connection until it closes, then waits before the next attempt. */
     private suspend fun connectOnce(me: Job, conn: Connection) {
-        var connected = false
         val problem: Problem = try {
             val welcome = withTimeout(HANDSHAKE_TIMEOUT_MS) { conn.welcome.await() }
             whileCurrent(me) {
-                connected = true
-                failures = 0
                 // A wake from before this connection is not a reason to skip the wait after it.
                 wake.tryReceive()
                 reconnectToken = conn.token
@@ -325,7 +335,7 @@ class RexClient(
         var retry: Long? = null
         val stillCurrent = whileCurrent(me) {
             val now = System.nanoTime()
-            if (connected) failingSince = now
+            if (conn.working) failingSince = now
             val failed = failures++
             retry = retryDelay(problem, failed)
             if (current === conn) current = null
@@ -358,6 +368,8 @@ class RexClient(
         val closed = CompletableDeferred<Problem>()
         val pending = ConcurrentHashMap<String, CompletableDeferred<Reply>>()
         var token: String? = null
+        /** Set by [markWorking]. Guarded by [lock]. */
+        var working = false
 
         fun fail(e: Exception) {
             welcome.completeExceptionally(e)

@@ -51,7 +51,7 @@ class GhosttyVtSmokeTest {
             assertTrue(rowCount > 0, "snapshot returned $rowCount")
 
             buffer.position(0)
-            assertEquals(2, buffer.int, "snapshot version")
+            assertEquals(3, buffer.int, "snapshot version")
             buffer.int
             val cols = buffer.int
             assertEquals(80, cols)
@@ -66,6 +66,7 @@ class GhosttyVtSmokeTest {
                 buffer.int
                 buffer.int
                 val textUnits = buffer.int
+                buffer.int
                 val cells = ArrayList<Cell>(cols)
                 repeat(cols) {
                     val foreground = buffer.int

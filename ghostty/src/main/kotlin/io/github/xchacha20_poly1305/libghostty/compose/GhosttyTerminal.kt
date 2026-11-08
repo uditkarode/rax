@@ -1,5 +1,6 @@
 package io.github.xchacha20_poly1305.libghostty.compose
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.rememberSplineBasedDecay
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -56,6 +57,9 @@ import kotlin.math.roundToInt
  *
  * @param fontSize applies whenever it changes; pinch zoom moves away from it and reports through [onFontSizeChanged].
  *
+ * @param focusOnAttach takes input focus when a session attaches, so a hardware keyboard types into it, and
+ * [keyboardOnAttach] also shows the software keyboard.
+ *
  * @param contentPadding keeps rows clear of whatever covers the edges of the view, as [contentPaddingMode] describes.
  * Horizontal padding narrows the grid in either mode.
  */
@@ -69,6 +73,7 @@ public fun GhosttyTerminal(
     fontFamily: FontFamily = FontFamily.Monospace,
     fontSize: TextUnit = 14.sp,
     focusOnAttach: Boolean = true,
+    keyboardOnAttach: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     contentPaddingMode: GhosttyContentPaddingMode = GhosttyContentPaddingMode.SCROLL_UNDER,
     onFontSizeChanged: (TextUnit) -> Unit = {},
@@ -150,10 +155,12 @@ public fun GhosttyTerminal(
     val accessibilityEnabled by rememberAccessibilityEnabled()
     LaunchedEffect(accessibilityEnabled) { controller.onAccessibilityChanged(accessibilityEnabled) }
 
+    BackHandler(enabled = controller.selectionActive) { controller.clearSelection() }
+
     LaunchedEffect(session, focusOnAttach) {
         if (session != null && focusOnAttach) {
             focusRequester.requestFocus()
-            controller.requestKeyboard()
+            if (keyboardOnAttach) controller.requestKeyboard()
         }
     }
 

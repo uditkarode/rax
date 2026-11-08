@@ -174,6 +174,12 @@ class ScreenDumpTest {
         assertEquals(24, dump.rows)
     }
 
+    @Test
+    fun aLostReplyIsLeftToTheCallerToTryAgain() {
+        val pane = Pane(longScreen, partBytes = 1000, failBlobRead = RexException.notConnected())
+        assertThrows(RexException::class.java) { runBlocking { readScreenDump(pane::call) } }
+    }
+
     private companion object {
         const val BLOB_ID = 7L
     }

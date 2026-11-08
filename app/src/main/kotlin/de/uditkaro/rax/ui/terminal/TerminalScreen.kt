@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,7 +49,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
@@ -80,6 +84,7 @@ import io.github.xchacha20_poly1305.libghostty.compose.GhosttyDialogs
 import io.github.xchacha20_poly1305.libghostty.compose.GhosttyJumpToBottomButton
 import io.github.xchacha20_poly1305.libghostty.compose.GhosttyTerminal
 import io.github.xchacha20_poly1305.libghostty.compose.rememberGhosttyTerminalState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -102,6 +107,11 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
     // Pinch zoom stays in the sizes the settings keep.
     terminalState.fontSizeRangeSp = Settings.FONT_SIZES
     val rootView = LocalView.current
+    // Ending the terminal's input session keeps the keyboard from coming back by itself when Rax returns.
+    val hideKeyboard: () -> Unit = {
+        terminalState.hideKeyboard()
+        ViewCompat.getWindowInsetsController(rootView)?.hide(WindowInsetsCompat.Type.ime())
+    }
     val scope = rememberCoroutineScope()
 
     var actions by remember { mutableStateOf(false) }
@@ -129,7 +139,7 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
     val typing = hasScreen && (view == PaneView.Live || view == PaneView.Reconnecting)
     val message = view is PaneView.Failed || view == PaneView.ElsewhereOwned || view == PaneView.Closed || view == PaneView.Unavailable
     LaunchedEffect(message) {
-        if (message) ViewCompat.getWindowInsetsController(rootView)?.hide(WindowInsetsCompat.Type.ime())
+        if (message) hideKeyboard()
     }
 
     Column(
@@ -139,18 +149,25 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
             .imePadding(),
     ) {
-        TopBar(
-            title = tab?.title ?: header.sessionName.ifEmpty { vm.live?.host?.name.orEmpty() },
-            subtitle = header.subtitle,
-            glyph = { tab?.let { ProgramGlyph(it.program, it.programName, it.icon, size = 30.dp) } },
-            vm = vm,
-            currentWindowId = target?.windowId,
-            // The tab menu and the actions need the tab's layout.
-            enabled = tab != null,
-            working = working,
-            onBack = onBack,
-            onActions = { actions = true },
-        )
+        // A short window, such as a phone in landscape, leaves room for the terminal with the keyboard open only
+        // without the top bar.
+        val short = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() } < SHORT_WINDOW
+        if (!imeVisible || !short) {
+            TopBar(
+                title = header.title.ifEmpty { vm.live?.host?.name.orEmpty() },
+                subtitle = header.subtitle,
+                glyph = { tab?.let { ProgramGlyph(it.program, it.programName, it.icon, size = 30.dp) } },
+                vm = vm,
+                currentWindowId = target?.windowId,
+                // The tab menu and the actions need the tab's layout.
+                enabled = tab != null,
+                working = working,
+                onBack = onBack,
+                onActions = { actions = true },
+            )
+        } else {
+            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+        }
 
         // Keeps the terminal from drawing over the top bar.
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
@@ -163,7 +180,7 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
                     darkColorScheme = theme.dark,
                     fontFamily = font,
                     fontSize = s.fontSize.sp,
-                    focusOnAttach = false,
+                    keyboardOnAttach = false,
                     onFontSizeChanged = { size -> graph.updateSettings { setFontSize(size.value) } },
                 )
             }
@@ -197,25 +214,36 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
             KeyBar(
                 terminal = terminalState,
                 enabled = typing,
-                onHideKeyboard = { ViewCompat.getWindowInsetsController(rootView)?.hide(WindowInsetsCompat.Type.ime()) },
+                onHideKeyboard = hideKeyboard,
             )
         } else {
-            Column(
-                Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = 10.dp, top = 6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+            val switcher: @Composable (Modifier) -> Unit = { modifier ->
                 if (panes.size > 1) {
-                    PaneSwitcher(panes, target?.blockId, onPick = { id ->
+                    PaneSwitcher(panes, target?.blockId, modifier, onPick = { id ->
                         target?.let { vm.show(PaneTarget(it.windowId, id)) }
                     })
                 }
+            }
+            val dock: @Composable () -> Unit = {
                 Dock(
                     terminal = terminalState,
                     enabled = typing,
                     onKeyboard = terminalState::showKeyboard,
                     onMore = { moreKeys = true },
                 )
+            }
+            val bottom = Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = 10.dp, top = 6.dp)
+            // In a short window the pane switcher sits next to the dock, so the terminal keeps more rows.
+            if (short) {
+                Row(bottom, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    switcher(Modifier.weight(1f, fill = false))
+                    dock()
+                }
+            } else {
+                Column(bottom, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    switcher(Modifier)
+                    dock()
+                }
             }
         }
     }
@@ -308,6 +336,9 @@ private fun TopBar(
                             )
                         },
                         leadingIcon = { ProgramGlyph(row.program, row.programName, row.icon, size = 24.dp) },
+                        trailingIcon = {
+                            if (w.id == currentWindowId) RaxIcon(R.drawable.ic_check, null, tint = c.link, size = 20.dp)
+                        },
                         onClick = {
                             tabs = false
                             val block = w.primaryBlockId ?: return@DropdownMenuItem
@@ -326,11 +357,11 @@ private fun TopBar(
 }
 
 @Composable
-private fun PaneSwitcher(panes: List<PaneChip>, selected: String?, onPick: (String) -> Unit) {
+private fun PaneSwitcher(panes: List<PaneChip>, selected: String?, modifier: Modifier, onPick: (String) -> Unit) {
     val c = Rax.colors
     val waiting = stringResource(R.string.waiting_generic)
     Row(
-        Modifier
+        modifier
             .padding(horizontal = 16.dp)
             .clip(RoundedCornerShape(22.dp))
             .background(c.card)
@@ -351,7 +382,7 @@ private fun PaneSwitcher(panes: List<PaneChip>, selected: String?, onPick: (Stri
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    pane.title,
+                    pane.shown,
                     style = RaxType.subhead,
                     color = when {
                         pane.waiting -> c.warning
@@ -393,13 +424,21 @@ private fun PaneOverlay(
                 view.bytes >= 512 * 1024 -> stringResource(R.string.terminal_loading_size, Formatter.formatShortFileSize(context, view.bytes))
                 else -> stringResource(R.string.terminal_loading)
             }
-            Column(
-                Modifier.fillMaxSize().padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-            ) {
-                CircularProgressIndicator(Modifier.size(28.dp), color = c.textSecondary, strokeWidth = 2.5.dp)
-                Text(label, style = RaxType.footnote, color = c.textSecondary, textAlign = TextAlign.Center)
+            // A pane that opens quickly, as most do, shows no spinner that flashes by.
+            var slow by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                delay(LOADING_DELAY_MS)
+                slow = true
+            }
+            AnimatedVisibility(slow, enter = fadeIn(), exit = fadeOut()) {
+                Column(
+                    Modifier.fillMaxSize().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+                ) {
+                    CircularProgressIndicator(Modifier.size(28.dp), color = c.textSecondary, strokeWidth = 2.5.dp)
+                    Text(label, style = RaxType.footnote, color = c.textSecondary, textAlign = TextAlign.Center)
+                }
             }
         }
         is PaneView.Failed -> Message(view.message, hasScreen) {
@@ -453,3 +492,9 @@ private fun Message(text: String, hasScreen: Boolean, action: @Composable () -> 
         }
     }
 }
+
+/** Windows shorter than this hide the top bar while the keyboard is open. */
+private val SHORT_WINDOW = 480.dp
+
+/** How long a pane loads before the screen says so. */
+private const val LOADING_DELAY_MS = 400L

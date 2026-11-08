@@ -365,7 +365,9 @@ private suspend fun AwaitPointerEventScope.longPress(controller: TerminalControl
         controller.showTextToolbar(cell)
         return
     }
-    var anchor = cell
+    // The selection keeps the whole word: dragging forward extends it from the word's start, and dragging back
+    // from its end.
+    var (wordStart, wordEnd) = controller.currentSelectionEnds() ?: (cell to cell)
     var pastSlop = false
     while (true) {
         val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
@@ -375,7 +377,13 @@ private suspend fun AwaitPointerEventScope.longPress(controller: TerminalControl
         pastSlop = true
         controller.textToolbar.hide()
         controller.magnifierCenter = change.position
-        anchor = controller.dragSelection(anchor, change.position)
+        val finger = controller.cellAt(change.position)
+        val back = finger.row < wordStart.row || (finger.row == wordStart.row && finger.column < wordStart.column)
+        val anchor = if (back) wordEnd else wordStart
+        // Dragging past the edge scrolls, which moves the word's rows too.
+        val scrolled = controller.dragSelection(anchor, change.position).row - anchor.row
+        wordStart = wordStart.copy(row = wordStart.row + scrolled)
+        wordEnd = wordEnd.copy(row = wordEnd.row + scrolled)
     }
     controller.magnifierCenter = Offset.Unspecified
     controller.showTextToolbar(cell)

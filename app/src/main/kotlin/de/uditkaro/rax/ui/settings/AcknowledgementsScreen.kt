@@ -8,7 +8,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import de.uditkaro.rax.AppGraph
 import de.uditkaro.rax.R
@@ -68,7 +67,7 @@ fun LicenseScreen(title: String, asset: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val text = produceState("", asset) {
         value = withContext(Dispatchers.IO) {
-            runCatching { context.assets.open(asset).bufferedReader().use { it.readText() } }.getOrDefault("")
+            runCatching { context.assets.open(asset).bufferedReader().use { reflowLicense(it.readText()) } }.getOrDefault("")
         }
     }
     LargeTitleScreen(title, onBack) {
@@ -77,10 +76,39 @@ fun LicenseScreen(title: String, asset: String, onBack: () -> Unit) {
                 Text(
                     text.value,
                     Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                    style = RaxType.footnote.copy(fontFamily = FontFamily.Monospace),
+                    style = RaxType.footnote,
                     color = Rax.colors.textSecondary,
                 )
             }
         }
     }
 }
+
+/**
+ * Joins the lines that a license file wrapped by hand, so its paragraphs wrap to the screen. A line that ends well
+ * before the paragraph's longest one ends where its author meant it to, as in a heading. A paragraph of only short
+ * lines, such as a list of copyright holders, keeps its lines, and list items and rules start their own lines.
+ */
+internal fun reflowLicense(text: String): String =
+    text.replace("\r\n", "\n").trim('\n').split(PARAGRAPH_BREAK).joinToString("\n\n") { paragraph ->
+        val lines = paragraph.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val longest = lines.maxOfOrNull { it.length } ?: 0
+        buildString {
+            lines.forEachIndexed { i, line ->
+                if (i > 0) {
+                    val previous = lines[i - 1]
+                    val ends = longest < WRAPPED_LINE || previous.length < longest * 3 / 4 ||
+                        LIST_ITEM.containsMatchIn(line) || RULE.matches(line) || RULE.matches(previous)
+                    append(if (ends) '\n' else ' ')
+                }
+                append(line)
+            }
+        }
+    }
+
+private val PARAGRAPH_BREAK = Regex("\n[ \t]*\n\\s*")
+private val LIST_ITEM = Regex("""^(\d+\.|\([a-z0-9]+\)|[-*•])\s""")
+private val RULE = Regex("""[-=_*~]{3,}""")
+
+/** License files wrap at 70 to 80 columns, so a paragraph with no line this long was not wrapped by hand. */
+private const val WRAPPED_LINE = 55

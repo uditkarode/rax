@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".RaxApplication"
@@ -20,10 +21,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Rax">
 
-        <!-- Compose follows a night mode change by itself, so a new appearance does not recreate the activity. -->
+        <!-- Compose follows these changes by itself. Without a new activity, the keyboard stays open when the
+             phone turns, and the screen does not flash when it turns, changes night mode or gets a keyboard. -->
         <activity
             android:name=".MainActivity"
-            android:configChanges="uiMode"
+            android:configChanges="uiMode|orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:exported="true"
             android:launchMode="singleTask"
             android:theme="@style/Theme.Rax.Starting"
@@ -42,5 +44,14 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the user's chosen connections to their own Rex terminal servers open so the app can notify them when a program in a terminal waits for their input." />
         </service>
+
+        <receiver
+            android:name=".connection.RestartReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

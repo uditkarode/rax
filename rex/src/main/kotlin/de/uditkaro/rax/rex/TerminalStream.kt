@@ -82,6 +82,7 @@ class TerminalStream(
                 }
                 val error = ticket.exceptionOrNull()
                 if (error is RexException && (error.code == "not_found" || error.code == "session_not_found")) {
+                    host.dataTokens.remove(blockId)
                     send(Event.Closed)
                     return@channelFlow
                 }
@@ -100,7 +101,7 @@ class TerminalStream(
             val inbox = Channel<Incoming>(Channel.UNLIMITED)
             val unread = Semaphore(INBOX_BYTES)
             val ws = host.httpClient.newWebSocket(
-                Request.Builder().url(host.endpoint.dataUrl).header("Sec-WebSocket-Protocol", SUBPROTOCOL).build(),
+                dataRequest(),
                 object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
                         webSocket.send(hello.toByteString())
@@ -141,6 +142,7 @@ class TerminalStream(
                             started = false
                         }
                         resume = Handshake(token, nonce)
+                        host.dataTokens[blockId] = token
                         failures = 0
                         rejects = 0
                         if (resumed) send(Event.Resumed)
@@ -151,8 +153,13 @@ class TerminalStream(
                         // old stream. When the pane was just left and opened again, that takes Rex a
                         // moment, so those tries come quickly at first.
                         if (resume == null) {
-                            if (++rejects == REJECTS_BEFORE_INTERRUPTED) send(Event.Interrupted)
                             val stillOpen = welcome[1] == REJECT_ALREADY_CONNECTED
+                            val stale = if (stillOpen) host.dataTokens.remove(blockId) else null
+                            if (stale != null) {
+                                endStale(stale)
+                                continue
+                            }
+                            if (++rejects == REJECTS_BEFORE_INTERRUPTED) send(Event.Interrupted)
                             delay(if (stillOpen && rejects <= QUICK_RETRIES) QUICK_RETRY_MS else backoff(failures++))
                         }
                         resume = null
@@ -161,6 +168,7 @@ class TerminalStream(
                     }
                     else -> {
                         if (first is Incoming.Closed && first.code == BLOCK_CLOSED) {
+                            host.dataTokens.remove(blockId)
                             send(Event.Closed)
                             return@channelFlow
                         }
@@ -203,6 +211,7 @@ class TerminalStream(
                     }
                 }
                 if (ended) {
+                    host.dataTokens.remove(blockId)
                     send(Event.Closed)
                     return@channelFlow
                 }
@@ -218,6 +227,44 @@ class TerminalStream(
             }
         }
         awaitClose()
+    }
+
+    private fun dataRequest() =
+        Request.Builder().url(host.endpoint.dataUrl).header("Sec-WebSocket-Protocol", SUBPROTOCOL).build()
+
+    /**
+     * Ends this client's stream of the pane that Rex still holds open, as it does for a socket that dropped without
+     * a close. A RESUME with the stream's token replaces that socket. It counts no bytes, fewer than Rex sent, so Rex
+     * rejects it and ends the stream, and the next HELLO gets a new one.
+     */
+    private suspend fun endStale(token: ByteArray) {
+        val answered = Channel<Unit>(Channel.CONFLATED)
+        val resume = ByteBuffer.allocate(25).order(ByteOrder.LITTLE_ENDIAN).put(0x02).put(token).putLong(0).array()
+        val ws = host.httpClient.newWebSocket(
+            dataRequest(),
+            object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    webSocket.send(resume.toByteString())
+                }
+
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    answered.trySend(Unit)
+                }
+
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    answered.trySend(Unit)
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    answered.trySend(Unit)
+                }
+            },
+        )
+        try {
+            withTimeoutOrNull(HANDSHAKE_TIMEOUT_MS) { answered.receive() }
+        } finally {
+            if (!ws.close(1000, null)) ws.cancel()
+        }
     }
 
     private sealed interface Incoming {
@@ -283,15 +330,17 @@ class PaneInput(
                     onDropped()
                     continue
                 }
-                for (part in writeParts(text, (st.link as RexClient.State.Connected).welcome.maxMessageBytes - REQUEST_MARGIN)) {
+                val parts = writeParts(text, (st.link as RexClient.State.Connected).welcome.maxMessageBytes - REQUEST_MARGIN)
+                for ((i, part) in parts.withIndex()) {
                     val sent = runCatching {
                         host.client.callBlock(sessionId, blockId, "write", buildJsonObject { put("data", part) })
                     }
                     // The rest of a paste without the part before it would be garbled. A write whose
-                    // answer was lost may have reached the pane, so only a refused one counts as dropped.
+                    // answer was lost may have reached the pane, so it counts as dropped only when
+                    // parts after it stay unsent.
                     val failure = sent.exceptionOrNull() ?: continue
                     if (failure is CancellationException) throw failure
-                    if (!(failure is RexException && failure.replyLost)) onDropped()
+                    if (!(failure is RexException && failure.replyLost) || i < parts.lastIndex) onDropped()
                     break
                 }
             }
@@ -330,7 +379,9 @@ class PaneInput(
     private suspend fun ready(): HostState = host.state.first { it.canCall(sessionId) }
 
     fun send(bytes: ByteArray) {
-        if (bytes.isNotEmpty()) queue.trySend(bytes)
+        // Rex takes input as text. Bytes that are not UTF-8, such as a mouse report in the X10 format past
+        // column 95, would reach the program as other characters.
+        if (bytes.isNotEmpty() && bytes.isUtf8()) queue.trySend(bytes)
     }
 
     /** Sizes the pane to the phone's grid; it applies when this client owns the pane. */
@@ -360,6 +411,14 @@ private const val REQUEST_MARGIN = 4096
  * Splits [text] into parts whose JSON string form takes at most [maxBytes] bytes of UTF-8, so a
  * large paste fits Rex's message limit. Parts end on code point boundaries.
  */
+private fun ByteArray.isUtf8(): Boolean =
+    try {
+        decodeToString(throwOnInvalidSequence = true)
+        true
+    } catch (_: CharacterCodingException) {
+        false
+    }
+
 private fun writeParts(text: String, maxBytes: Int): List<String> {
     val parts = ArrayList<String>(1)
     var start = 0

@@ -77,6 +77,7 @@
     <string name="problem_update_rex">Update Rex on this computer to use it with Rax</string>
     <string name="problem_update_rax">Update Rax to use this version of Rex</string>
     <string name="problem_closed">The connection closed</string>
+    <string name="problem_phone_offline">This phone is offline</string>
     <string name="problem_tailnet_approval">Waiting for an admin of your tailnet to approve this phone</string>
     <string name="problem_tailnet_failed">Tailscale didn’t start</string>
     <string name="problem_tailnet_logging">Your tailnet requires network flow logs</string>

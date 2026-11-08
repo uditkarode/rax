@@ -558,6 +558,10 @@ it returned only that screen (173 bytes).
   After a real network loss, bytes in flight are likely lost, so expect 0x03 and start over: new ticket,
   HELLO, new snapshot.
 - A count higher than sent gets 0x05 and ends the stream (a later correct RESUME got 0x03).
+- A RESUME also ends a stream whose socket Rex still holds open, as it does for a socket that dropped
+  without a close. While that socket was open, a new HELLO got 0x02. A RESUME with its token then got
+  WELCOME (exact count), 0x05 (too many) or 0x03 (too few, 0 bytes), and in each case the next HELLO got
+  WELCOME (observed). The old socket got no close frame.
 - Closing a data connection with status 1000 ends the stream.
 
 ### 5.9 Data close codes

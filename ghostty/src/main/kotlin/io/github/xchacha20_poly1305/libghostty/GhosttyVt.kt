@@ -157,7 +157,7 @@ internal object GhosttyVt {
 
     external fun nativeGetBackgroundColor(handle: Long): Int
 
-    external fun nativeIsPasteSafe(data: ByteArray): Boolean
+    external fun nativeIsPasteSafe(handle: Long, data: ByteArray): Boolean
 
     external fun nativeEncodePaste(handle: Long, data: ByteArray): ByteArray?
 }

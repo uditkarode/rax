@@ -283,7 +283,8 @@ private fun TabRowView(tab: TabRow, onOpen: (TabRow) -> Unit, showSession: Boole
             if (tab.detail != null) {
                 Text(
                     tab.detail,
-                    style = RaxType.footnote,
+                    // The weight marks it too, since some themes' warning colour is close to their text.
+                    style = if (tab.waiting) RaxType.footnoteStrong else RaxType.footnote,
                     color = if (tab.waiting) c.warning else c.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

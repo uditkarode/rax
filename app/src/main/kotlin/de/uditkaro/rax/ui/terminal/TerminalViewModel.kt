@@ -17,7 +17,6 @@ import de.uditkaro.rax.rex.RexException
 import de.uditkaro.rax.rex.RexHost
 import de.uditkaro.rax.rex.TerminalStream
 import de.uditkaro.rax.rex.WindowView
-import de.uditkaro.rax.ui.home.Access
 import de.uditkaro.rax.ui.home.Link
 import de.uditkaro.rax.ui.home.Need
 import de.uditkaro.rax.ui.home.TabRow
@@ -77,15 +76,20 @@ data class PaneTarget(val windowId: String, val blockId: String)
 /** What the screen shows around the terminal: the shown tab, its panes and the session. */
 data class PaneHeader(
     val sessionName: String,
-    /** Null until the tab's layout arrives. */
+    /** Null until the tab's layout arrives, and after the tab closes. */
     val tab: TabRow?,
+    /** The tab's title, which stays after the tab closes. Empty when nothing names it yet. */
+    val title: String,
     val subtitle: String,
     val panes: List<PaneChip>,
 )
 
-/** A pane of the shown tab. [label] is the name the user gave it, if any. */
-data class PaneChip(val id: String, val name: String, val label: String?, val waiting: Boolean) {
-    /** What the pane is called on screen. */
+/**
+ * A pane of the shown tab. [label] is the name the user gave it, if any. [shown] is what the pane switcher
+ * calls it, which tells apart panes that run the same program.
+ */
+data class PaneChip(val id: String, val name: String, val label: String?, val waiting: Boolean, val shown: String = name) {
+    /** What the pane is called. */
     val title: String get() = label?.takeIf { it.isNotBlank() } ?: name
 }
 
@@ -120,12 +124,15 @@ class TerminalViewModel(
     val host: StateFlow<HostState?> = (live?.rex?.state ?: flowOf(null))
         .stateIn(viewModelScope, SharingStarted.Eagerly, live?.rex?.state?.value)
 
+    /** The last header that had its tab, so the top bar keeps the tab's name after the tab closes. */
+    private var lastTabHeader: Pair<String, PaneHeader>? = null
+
     /** Only what the screen shows of the host, so events elsewhere on the host do not redraw it. */
     val header: StateFlow<PaneHeader> = combine(host, _target) { st, target -> headerOf(st, target) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, headerOf(host.value, _target.value))
 
-    private val link: StateFlow<Link?> = combine(host, graph.tailnet.status, graph.localNetwork.granted, graph.localNetwork.names) { st, tailnet, local, names ->
-        live?.let { hostLink(app.resources, it.host, st, Access(tailnet, local, names)) }
+    private val link: StateFlow<Link?> = combine(host, graph.access) { st, access ->
+        live?.let { hostLink(app.resources, it.host, st, access) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val loaded = MutableStateFlow(0L)
@@ -152,9 +159,6 @@ class TerminalViewModel(
     private var pauseJob: Job? = null
     /** The stream ended because the screen was out of sight, so it starts again when the screen shows. */
     private var paused = false
-
-    /** The grid the terminal last sent to Rex, so the next emulator can start at that size. */
-    @Volatile private var grid: Grid? = null
 
     private class Grid(val columns: Int, val rows: Int, val cellWidth: Int, val cellHeight: Int)
 
@@ -276,22 +280,32 @@ class TerminalViewModel(
         val session = st?.session(sessionId)
         val sessionName = session?.info?.label.orEmpty()
         val window = window(st, target?.windowId)
+        if (window == null && target != null) {
+            lastTabHeader?.takeIf { it.first == target.windowId }?.let { (_, last) -> return last.copy(tab = null, panes = emptyList()) }
+        }
         val blocks = st?.blocks.orEmpty()
         val facts = target?.blockId?.let { blocks[it] }
-        return PaneHeader(
+        val tab = window?.let { tabRow(getApplication<Application>().resources, hostId, sessionId, sessionName, it, 0, blocks, target?.blockId) }
+        val chips = window?.blocks.orEmpty().filter { it.isTerminal && it.id != null }.map { block ->
+            val f = blocks[block.id]
+            PaneChip(
+                id = block.id!!,
+                name = f?.status?.values?.firstNotNullOfOrNull { it.effectiveApp ?: it.app }?.let(::appName) ?: f?.programName ?: "…",
+                label = block.userLabel,
+                waiting = f?.waiting != null,
+            )
+        }
+        val header = PaneHeader(
             sessionName = sessionName,
-            tab = window?.let { tabRow(getApplication<Application>().resources, hostId, sessionId, sessionName, it, 0, blocks, target?.blockId) },
-            subtitle = listOfNotNull(session?.info?.label, shortPath(facts?.cwd, facts?.process?.home)).joinToString("  ·  "),
-            panes = window?.blocks.orEmpty().filter { it.isTerminal && it.id != null }.map { block ->
-                val f = blocks[block.id]
-                PaneChip(
-                    id = block.id!!,
-                    name = f?.status?.values?.firstNotNullOfOrNull { it.effectiveApp ?: it.app }?.let(::appName) ?: f?.programName ?: "…",
-                    label = block.userLabel,
-                    waiting = f?.waiting != null,
-                )
-            },
+            tab = tab,
+            title = tab?.title ?: sessionName,
+            // The title shows the session's name while there is no tab.
+            subtitle = listOfNotNull(session?.info?.label?.takeIf { tab != null }, shortPath(facts?.cwd, facts?.process?.home))
+                .joinToString("  ·  "),
+            panes = distinctChips(chips, chips.map { blocks[it.id]?.cwd?.trimEnd('/')?.substringAfterLast('/')?.ifEmpty { null } }),
         )
+        if (tab != null && target != null) lastTabHeader = target.windowId to header
+        return header
     }
 
     fun window(st: HostState?, windowId: String? = _target.value?.windowId): WindowView? =
@@ -396,11 +410,22 @@ class TerminalViewModel(
      * the pane's size on Rex, so rows and the cursor land where Rex has them. Null if Rex cannot send the screen.
      */
     private suspend fun redrawn(target: PaneTarget): GhosttyTerminalSession? {
-        val client = live?.rex?.client ?: return null
-        val screen = readScreenDump(
-            call = { method, args -> client.callBlock(sessionId, target.blockId, method, args) },
-            onProgress = { lastProgress = SystemClock.elapsedRealtime() },
-        ) ?: return null
+        val rex = live?.rex ?: return null
+        var screen: ScreenDump? = null
+        for (attempt in 1..REDRAW_TRIES) {
+            screen = try {
+                readScreenDump(
+                    call = { method, args -> rex.client.callBlock(sessionId, target.blockId, method, args) },
+                    onProgress = { lastProgress = SystemClock.elapsedRealtime() },
+                ) ?: return null
+            } catch (e: RexException) {
+                // The connection dropped, or a new one has not attached the session yet.
+                rex.state.first { it.canCall(sessionId) }
+                continue
+            }
+            break
+        }
+        if (screen == null) return null
         val session = GhosttyTerminalSession(options(screen.columns, screen.rows))
         screen.parts.forEach { session.feedOutput(it) }
         drawnUntil = screen.drawnAt
@@ -601,11 +626,20 @@ class TerminalViewModel(
     private companion object {
         const val TAG = "TerminalViewModel"
 
+        /**
+         * The grid a terminal last sent to Rex, so the next emulator can start at that size, also on the first pane
+         * a screen opens.
+         */
+        @Volatile var grid: Grid? = null
+
         /** A little longer than Rex keeps a dropped client. */
         const val RESUME_WINDOW_MS = 90_000L
 
         /** How long to wait before an ownership change whose answer was lost goes out again. */
         const val RETRY_MS = 1_000L
+
+        /** How often Rax reads a pane's screen again when the reads fail in a way that can pass. */
+        const val REDRAW_TRIES = 3
 
         /** How long a pane may load or reconnect with nothing arriving before Rax calls it failed. */
         const val STALL_MS = 20_000L
@@ -613,4 +647,19 @@ class TerminalViewModel(
         /** How long the stream of a screen that is out of sight stays open, like the control connection's grace period. */
         const val HIDDEN_STREAM_MS = 30_000L
     }
+}
+
+/**
+ * Names [chips] so the pane switcher tells them apart: a pane that runs the same program as another gets its
+ * directory from [dirs] when that is its own, or else its number among them.
+ */
+internal fun distinctChips(chips: List<PaneChip>, dirs: List<String?>): List<PaneChip> = chips.mapIndexed { i, chip ->
+    val same = chips.indices.filter { chips[it].title == chip.title }
+    val dir = dirs[i]
+    val shown = when {
+        same.size == 1 -> chip.title
+        dir != null && same.count { dirs[it] == dir } == 1 -> "${chip.title} · $dir"
+        else -> "${chip.title} ${same.indexOf(i) + 1}"
+    }
+    chip.copy(shown = shown)
 }

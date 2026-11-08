@@ -238,12 +238,33 @@ class RexHostTest {
         val waiting = waitFor("session attached") { it.session("session:1")?.attach == Attach.Done }
         assertFalse(waiting.loaded)
 
+        // Well before the 2 s the first load waits at most.
         control.reply(read, FakeRex.status("" to "working"))
-        waitFor("loaded") { it.loaded }
+        runBlocking { withTimeout(500) { host.state.first { it.loaded } } }
 
+        // Every state from the drop until the new connection is ready keeps the sessions loaded.
+        val states = CopyOnWriteArrayList<HostState>()
+        val recording = scope.launch { host.state.collect { states += it } }
         control.drop()
         rex.nextControl()
-        assertTrue(host.state.value.loaded)
+        waitFor("ready again") { it.ready && it.session("session:1")?.attach == Attach.Done }
+        recording.cancel()
+        assertTrue(states.all { it.loaded })
+    }
+
+    @Test
+    fun aConnectionThatFailsItsSetupCountsAsFailing() {
+        rex.onRequest = { c, r ->
+            if (r.method == "session.bootstrap") {
+                c.fail(r, "internal", 500)
+                true
+            } else {
+                false
+            }
+        }
+        host.start()
+        // Without counting, each new connection would start again from the first attempt.
+        runBlocking { withTimeout(10_000) { host.client.state.first { it is RexClient.State.Connecting && it.attempt >= 2 } } }
     }
 
     @Test

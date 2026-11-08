@@ -39,8 +39,10 @@ screen. It shows one pane at a time and can switch panes.
    it shows. Output that arrived before Rex drew the screen is already in it, so Rax drops it.
    The size call times a round trip, and Rex's drawing reaches the phone's clock about one round
    trip after the `format` call goes out. The reply itself comes later when the screen is long.
-   If Rex cannot send the screen, the status becomes `Failed` and the stream ends, so the pane
-   shows "Couldn't open this pane" with Retry, and not a blank emulator.
+   A read whose answer was lost, or that came before a new connection attached the session, goes
+   out again once Rex takes calls. If Rex refuses to send the screen, the status becomes `Failed`
+   and the stream ends, so the pane shows "Couldn't open this pane" with Retry, and not a blank
+   emulator.
 3. Status becomes Live. Every later `Started` (a stream that could not resume) builds a new
    emulator from the new snapshot.
 
@@ -54,7 +56,11 @@ screen. It shows one pane at a time and can switch panes.
   terminal queries, and it sends the size (mode 2048) and colour scheme (mode 2031) reports
   itself. The phone sends no focus reports, and it denies clipboard reads without asking.
 - When the terminal's grid changes, the session calls `sendResize`. Rax sends the size, and if the pane is
-  visible and not owned elsewhere, it asks to own the pane.
+  visible and not owned elsewhere, it asks to own the pane. The view also resizes each session that
+  attaches to it, so a new emulator tells Rex the phone's size even when the grid stays the same.
+- The last grid sent to Rex is kept for the whole process. A new emulator is resized to it on
+  `terminalThread` before it shows, so rewrapping a long scrollback stays off the main thread, also
+  for the first pane a screen opens.
 - Rax sends the active terminal colours and whether the theme is light or dark with `set_theme`
   when a pane opens, on each new data connection, and when the theme changes. Like the size, Rex
   applies them while the phone owns the pane, and answers programs that ask for the background
@@ -105,6 +111,9 @@ area is never blank without a reason on screen:
 
 The screen also shows `Loading` while the terminal font loads, because a session can be ready
 before its font.
+
+`Loading` shows its spinner and text only after 400 ms, so a pane that opens quickly, as a pane
+switch usually does, shows a blank terminal for a moment and no spinner that flashes by.
 
 ## Switching panes
 

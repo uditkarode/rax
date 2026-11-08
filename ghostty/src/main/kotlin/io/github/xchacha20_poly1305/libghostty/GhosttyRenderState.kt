@@ -67,6 +67,7 @@ public class GhosttyRenderState {
     private var rowChars = emptyArray<CharArray>()
     private var rowSelectionStart = IntArray(0)
     private var rowSelectionEnd = IntArray(0)
+    private var rowContinues = BooleanArray(0)
 
     public fun foreground(column: Int, row: Int): Int = foreground[row * columns + column]
 
@@ -84,6 +85,9 @@ public class GhosttyRenderState {
     public fun textOffset(column: Int, row: Int): Int = textOffset[row * columns + column]
 
     public fun textLength(column: Int, row: Int): Int = textLength[row * columns + column]
+
+    /** Whether [row] continues the row above it, which the terminal soft-wrapped into it. */
+    public fun continuesRow(row: Int): Boolean = rowContinues[row]
 
     /** The selected columns of a row, both included. */
     public fun selection(row: Int): IntRange? {
@@ -196,6 +200,7 @@ public class GhosttyRenderState {
         rowChars = Array(newRows) { CharArray(0) }
         rowSelectionStart = IntArray(newRows) { -1 }
         rowSelectionEnd = IntArray(newRows) { -1 }
+        rowContinues = BooleanArray(newRows)
     }
 
     private fun readRow(buffer: ByteBuffer, selectionBackground: Int?, selectionForeground: Int?) {
@@ -203,6 +208,7 @@ public class GhosttyRenderState {
         val selectionStart = buffer.int
         var selectionEnd = buffer.int
         val textUnits = buffer.int
+        val rowFlags = buffer.int
         val cellsPosition = buffer.position()
         val textPosition = cellsPosition + columns * CELL_RECORD_BYTES
         val next = textPosition + textUnits * 2 + if (textUnits % 2 != 0) 2 else 0
@@ -248,6 +254,7 @@ public class GhosttyRenderState {
         }
         rowSelectionStart[row] = selectionStart
         rowSelectionEnd[row] = selectionEnd.coerceAtMost(columns - 1)
+        rowContinues[row] = rowFlags and ROW_CONTINUES != 0
         buffer.position(next)
     }
 
@@ -274,9 +281,10 @@ public class GhosttyRenderState {
     }
 
     private companion object {
-        const val SNAPSHOT_VERSION = 2
+        const val SNAPSHOT_VERSION = 3
         const val HEADER_BYTES = 60
-        const val ROW_HEADER_BYTES = 16
+        const val ROW_HEADER_BYTES = 20
+        const val ROW_CONTINUES = 1 shl 0
         const val CELL_RECORD_BYTES = 16
         const val TEXT_UNITS_PER_CELL = 4
         const val COLUMNS_OFFSET = 8

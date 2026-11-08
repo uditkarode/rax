@@ -1,5 +1,7 @@
 package de.uditkaro.rax.rex
 
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -7,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
@@ -17,6 +20,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -72,6 +76,39 @@ class TerminalStreamTest {
         assertEquals("a new stream starts with HELLO", 0x01.toByte(), second.first.poll(10, TimeUnit.SECONDS)!![0])
         waitUntil("two streams") { events.count { it is TerminalStream.Event.Started } == 2 }
         assertEquals(2, rex.requests.count { it == "data.connect" })
+    }
+
+    @Test
+    fun aStreamRexStillHoldsIsEndedBeforeANewOne() {
+        val streams = AtomicInteger()
+        rex.onData = { data ->
+            when (streams.incrementAndGet()) {
+                // Rex still holds the first stream, whose close did not reach it.
+                2 -> data.reject(0x02)
+                3 -> data.reject(0x03)
+                else -> {
+                    data.welcome(nonce = 5)
+                    data.send("screen".toByteArray())
+                }
+            }
+        }
+        host.start()
+        val firstEvents = CopyOnWriteArrayList<TerminalStream.Event>()
+        val firstStream = scope.launch {
+            TerminalStream(host, "session:1", "block:a").events().collect { firstEvents += it }
+        }
+        rex.nextData()
+        waitUntil("first stream started") { firstEvents.any { it is TerminalStream.Event.Started } }
+        runBlocking { firstStream.cancelAndJoin() }
+
+        val events = collect()
+        assertEquals(0x01.toByte(), rex.nextData().first.poll(10, TimeUnit.SECONDS)!![0])
+        val resume = rex.nextData().first.poll(10, TimeUnit.SECONDS)!!
+        assertEquals("the old stream is ended with a RESUME", 0x02.toByte(), resume[0])
+        assertArrayEquals(ByteArray(16) { 7 }, resume.copyOfRange(1, 17))
+        assertEquals(0L, ByteBuffer.wrap(resume, 17, 8).order(ByteOrder.LITTLE_ENDIAN).long)
+        assertEquals(0x01.toByte(), rex.nextData().first.poll(10, TimeUnit.SECONDS)!![0])
+        waitUntil("new stream started") { events.any { it is TerminalStream.Event.Started } }
     }
 
     @Test

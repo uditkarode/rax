@@ -1,11 +1,14 @@
 package io.github.xchacha20_poly1305.libghostty.compose
 
 import android.content.Context
+import android.graphics.Matrix
 import android.text.InputType
+import android.text.Selection
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.CursorAnchorInfo
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
@@ -67,17 +70,26 @@ private class TerminalInputNode(
     private var focused = false
     private var keyboardPending = false
 
+    /** The connection whose input method follows the cursor, to place its windows next to it. */
+    private var cursorWatcher: TerminalInputConnection? = null
+
     override fun onAttach() {
         controller.showSoftwareKeyboard = ::showKeyboard
+        controller.hideSoftwareKeyboard = ::hideKeyboard
+        controller.onFrameUpdated = ::onFrameUpdated
     }
 
     override fun onDetach() {
         if (controller.showSoftwareKeyboard == ::showKeyboard) controller.showSoftwareKeyboard = {}
+        if (controller.hideSoftwareKeyboard == ::hideKeyboard) controller.hideSoftwareKeyboard = {}
+        if (controller.onFrameUpdated == ::onFrameUpdated) controller.onFrameUpdated = {}
     }
 
     fun update(controller: TerminalController, enforceCharBasedInput: Boolean) {
         this.controller = controller
         controller.showSoftwareKeyboard = ::showKeyboard
+        controller.hideSoftwareKeyboard = ::hideKeyboard
+        controller.onFrameUpdated = ::onFrameUpdated
         if (this.enforceCharBasedInput != enforceCharBasedInput) {
             this.enforceCharBasedInput = enforceCharBasedInput
             // The input type is read when the input method connects.
@@ -111,9 +123,14 @@ private class TerminalInputNode(
         }
     }
 
+    private fun onFrameUpdated() {
+        cursorWatcher?.reportCursor()
+    }
+
     private fun stopInput() {
         session?.cancel()
         session = null
+        cursorWatcher = null
         controller.setComposing(null)
     }
 
@@ -128,6 +145,13 @@ private class TerminalInputNode(
         }
     }
 
+    private fun hideKeyboard() {
+        keyboardPending = false
+        stopInput()
+        val imm = view.context.getSystemService(InputMethodManager::class.java)
+        imm.hideSoftInputFromWindow(view.windowToken, 0)
+    }
+
     private fun showKeyboardNow() {
         val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.showSoftInput(view, 0)
@@ -135,15 +159,7 @@ private class TerminalInputNode(
 
     override fun onKeyEvent(event: ComposeKeyEvent): Boolean = handle(event.nativeKeyEvent)
 
-    override fun onPreKeyEvent(event: ComposeKeyEvent): Boolean {
-        val native = event.nativeKeyEvent
-        // Back dismisses the selection before it reaches the activity.
-        if (native.keyCode == KeyEvent.KEYCODE_BACK && controller.selectionActive) {
-            if (native.action == KeyEvent.ACTION_DOWN) controller.clearSelection()
-            return true
-        }
-        return false
-    }
+    override fun onPreKeyEvent(event: ComposeKeyEvent): Boolean = false
 
     private fun handle(event: KeyEvent): Boolean {
         @Suppress("DEPRECATION")
@@ -187,7 +203,40 @@ private class TerminalInputNode(
         }
     }
 
-    private inner class TerminalInputConnection(view: View) : BaseInputConnection(view, true) {
+    private inner class TerminalInputConnection(private val target: View) : BaseInputConnection(target, true) {
+        override fun requestCursorUpdates(cursorUpdateMode: Int): Boolean {
+            if (cursorUpdateMode and InputConnection.CURSOR_UPDATE_MONITOR != 0) {
+                cursorWatcher = this
+            } else if (cursorWatcher === this) {
+                cursorWatcher = null
+            }
+            if (cursorUpdateMode and InputConnection.CURSOR_UPDATE_IMMEDIATE != 0) reportCursor()
+            return true
+        }
+
+        fun reportCursor() {
+            val rect = controller.cursorRectInRoot() ?: return
+            val content = editable ?: return
+            val onScreen = IntArray(2).also(target::getLocationOnScreen)
+            val builder = CursorAnchorInfo.Builder()
+                .setMatrix(Matrix().apply { setTranslate(onScreen[0].toFloat(), onScreen[1].toFloat()) })
+                .setSelectionRange(Selection.getSelectionStart(content), Selection.getSelectionEnd(content))
+                .setInsertionMarkerLocation(
+                    rect.left,
+                    rect.top,
+                    rect.bottom,
+                    rect.bottom,
+                    CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION,
+                )
+            val composingStart = BaseInputConnection.getComposingSpanStart(content)
+            val composingEnd = BaseInputConnection.getComposingSpanEnd(content)
+            if (composingStart in 0 until composingEnd) {
+                builder.setComposingText(composingStart, content.subSequence(composingStart, composingEnd))
+            }
+            target.context.getSystemService(InputMethodManager::class.java)
+                .updateCursorAnchorInfo(target, builder.build())
+        }
+
         override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
             super.commitText(text, newCursorPosition)
             flushEditable()
@@ -212,6 +261,14 @@ private class TerminalInputNode(
                 sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
             }
             return super.deleteSurroundingText(beforeLength, afterLength)
+        }
+
+        override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+            repeat(beforeLength) {
+                sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
+                sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+            }
+            return super.deleteSurroundingTextInCodePoints(beforeLength, afterLength)
         }
 
         private fun flushEditable() {

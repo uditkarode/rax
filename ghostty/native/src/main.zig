@@ -623,10 +623,11 @@ const natives = struct {
         return session(handle).effectiveBackground();
     }
 
-    pub fn nativeIsPasteSafe(env: *jni.Env, _: jni.Object, data: jni.ByteArray) jni.Boolean {
+    pub fn nativeIsPasteSafe(env: *jni.Env, _: jni.Object, handle: i64, data: jni.ByteArray) jni.Boolean {
+        const s = session(handle);
         const bytes = env.byteArrayAlloc(alloc, data) catch return 0;
         defer alloc.free(bytes);
-        return boolean(vt.input.isSafePaste(bytes));
+        return boolean(vt.input.isSafePasteWith(bytes, .fromTerminal(&s.terminal)));
     }
 
     pub fn nativeEncodePaste(env: *jni.Env, _: jni.Object, handle: i64, data: jni.ByteArray) jni.ByteArray {

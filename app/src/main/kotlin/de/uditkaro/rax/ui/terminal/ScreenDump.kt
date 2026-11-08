@@ -1,6 +1,7 @@
 package de.uditkaro.rax.ui.terminal
 
 import android.util.Log
+import de.uditkaro.rax.rex.RexException
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -20,7 +21,8 @@ internal class ScreenDump(val columns: Int, val rows: Int, val parts: List<ByteA
 
 /**
  * Reads a pane's screen from Rex, for a snapshot this build cannot read. [call] calls one of the pane's methods, and
- * [onProgress] runs after each reply. Returns null if Rex cannot send all of it.
+ * [onProgress] runs after each reply. Returns null if Rex cannot send all of it. Throws the [RexException] of a call
+ * that can work later: its answer was lost, or Rex has not attached the session to a new connection yet.
  */
 internal suspend fun readScreenDump(
     call: suspend (method: String, args: JsonObject?) -> JsonObject,
@@ -55,6 +57,10 @@ internal suspend fun readScreenDump(
         }
     } catch (e: CancellationException) {
         throw e
+    } catch (e: RexException) {
+        if (e.replyLost || e.code == "conflict") throw e
+        Log.w(TAG, "could not read the screen", e)
+        return null
     } catch (e: Exception) {
         Log.w(TAG, "could not read the screen", e)
         return null

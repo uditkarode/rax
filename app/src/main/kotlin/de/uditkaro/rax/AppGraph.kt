@@ -15,6 +15,7 @@ import de.uditkaro.rax.terminal.TerminalFonts
 import de.uditkaro.rax.tailnet.Tailnet
 import de.uditkaro.rax.tailnet.TailnetStatus
 import de.uditkaro.rax.theme.ThemeCatalog
+import de.uditkaro.rax.ui.home.Access
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -87,6 +88,11 @@ class AppGraph(val app: Application) {
         keepInBackground = backgroundAlerts.map { it == true }.stateIn(scope, SharingStarted.Eagerly, false),
     )
 
+    /** What the phone allows and whether it has a network, which decide whether hosts can be reached. */
+    val access: StateFlow<Access> = combine(tailnet.status, localNetwork.granted, localNetwork.names, connections.online) { t, local, names, online ->
+        Access(t, local, names, online)
+    }.stateIn(scope, SharingStarted.Eagerly, Access(tailnet.status.value, localNetwork.granted.value, localNetwork.names.value, connections.online.value))
+
     /** Runs [tailnet] while a saved host uses it and [connections] is in use, or while something holds it. */
     val tailnetKeeper = TailnetKeeper(
         scope = scope,
@@ -107,7 +113,7 @@ class AppGraph(val app: Application) {
             val fontId = settings.filterNotNull().first().fontId
             if (!fonts.exists(fontId)) settingsStore.setFont(Settings.DEFAULT_FONT)
         }
-        Alerts(app, connections, scope)
+        Alerts(app, connections, backgroundAlerts, scope)
         scope.launch { watching.filterNotNull().collect { syncAlertService() } }
         // LAN hosts that waited for the permission connect as soon as it is granted, without waiting
         // out their retry delay.
@@ -127,6 +133,18 @@ class AppGraph(val app: Application) {
             null -> Unit
         }
     }
+
+    /** [syncAlertService] once the settings and hosts are read. */
+    suspend fun syncAlertServiceWhenRead() {
+        watching.filterNotNull().first()
+        syncAlertService()
+    }
+
+    /**
+     * The hosts that Home showed with a problem and that have not been online since. Home keeps
+     * their sessions hidden while they connect again, also when Home itself is made again.
+     */
+    val offlineOnHome = MutableStateFlow<Set<String>>(emptySet())
 
     private val _signingOut = MutableStateFlow(false)
 

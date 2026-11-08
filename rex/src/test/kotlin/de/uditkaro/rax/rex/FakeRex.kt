@@ -241,6 +241,10 @@ class FakeRex : Closeable {
         fun send(bytes: ByteArray) {
             ws.send(bytes.toByteString())
         }
+
+        fun reject(reason: Int) {
+            ws.send(byteArrayOf(0x82.toByte(), reason.toByte()).toByteString())
+        }
     }
 
     override fun close() {

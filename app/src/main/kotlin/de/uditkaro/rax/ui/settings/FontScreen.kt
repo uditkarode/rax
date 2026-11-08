@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -92,13 +94,16 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
 
     LargeTitleScreen(stringResource(R.string.font_title), onBack) {
         item(key = "preview") {
+            // The preview keeps the height of the largest size, so the slider below it stays under the finger.
+            val tallest = with(LocalDensity.current) { (Settings.FONT_SIZES.endInclusive * PREVIEW_LINE_HEIGHT * 3).sp.toDp() }
             Box(
                 Modifier
                     .padding(start = 16.dp, end = 16.dp, top = 16.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(androidx.compose.ui.graphics.Color(theme.terminal.background))
                     .border(1.dp, Rax.colors.stroke, RoundedCornerShape(16.dp))
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+                    .heightIn(min = tallest),
             ) {
                 // The system's monospace font holds the preview's place while the font loads.
                 TerminalPreview(terminalFont ?: FontFamily.Monospace, size, theme.terminal)
@@ -205,3 +210,6 @@ private fun FontRow(
         }
     }
 }
+
+/** A terminal row's height as a multiple of the font size, a little more than most fonts need. */
+private const val PREVIEW_LINE_HEIGHT = 1.4f

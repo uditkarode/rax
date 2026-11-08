@@ -114,6 +114,12 @@ public class GhosttyTerminal internal constructor() {
         mods,
     )?.takeIf { it.isNotEmpty() }
 
+    /**
+     * Whether pasting [text] cannot run commands by itself. With bracketed paste on, the program gets the text as one
+     * paste, and only text that ends bracketed paste early is unsafe. Without it, a line break is unsafe too.
+     */
+    public fun isPasteSafe(text: String): Boolean = GhosttyVt.nativeIsPasteSafe(handle, text.toByteArray(Charsets.UTF_8))
+
     /** Encodes pasted text, bracketing it when the program enabled bracketed paste. */
     public fun encodePaste(text: String): ByteArray? =
         GhosttyVt.nativeEncodePaste(handle, text.toByteArray(Charsets.UTF_8))?.takeIf { it.isNotEmpty() }
@@ -133,14 +139,6 @@ public class GhosttyTerminal internal constructor() {
     internal fun snapshot(buffer: ByteBuffer, full: Boolean): Int = GhosttyVt.nativeSnapshot(handle, buffer, full)
 
     internal fun kittyPlacements(): LongArray? = GhosttyVt.nativeKittyPlacements(handle)
-
-    public companion object {
-        /**
-         * Whether pasting [text] cannot run commands by itself: it has no line break and cannot end bracketed
-         * paste early.
-         */
-        public fun isPasteSafe(text: String): Boolean = GhosttyVt.nativeIsPasteSafe(text.toByteArray(Charsets.UTF_8))
-    }
 }
 
 /** The viewport within the scrollback, in rows: [offset] is where the viewport starts in [total]. */

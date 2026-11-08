@@ -3,6 +3,7 @@ package de.uditkaro.rax.theme
 import android.content.res.AssetManager
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -131,12 +132,22 @@ fun parseArgb(hex: String): Int {
 }
 
 /**
- * [color] when it reads well as text on [background], else [fallback]. Some themes have a muted
- * accent meant for filled controls, which is too faint for words and icons.
+ * [color] when it reads well as text on [background], else [color] moved toward [toward] until it
+ * does. Some themes have a muted accent meant for filled controls, which is too faint for words and
+ * icons, and links must still look like links.
  */
-internal fun readableOn(color: Color, background: Color, fallback: Color): Color {
-    val a = color.luminance() + 0.05f
-    val b = background.luminance() + 0.05f
-    val contrast = maxOf(a, b) / minOf(a, b)
-    return if (contrast >= 4.5f) color else fallback
+internal fun readableOn(color: Color, background: Color, toward: Color): Color {
+    for (step in 0..LINK_STEPS) {
+        val candidate = lerp(color, toward, step.toFloat() / LINK_STEPS)
+        if (contrast(candidate, background) >= 4.5f) return candidate
+    }
+    return toward
+}
+
+private const val LINK_STEPS = 20
+
+private fun contrast(a: Color, b: Color): Float {
+    val x = a.luminance() + 0.05f
+    val y = b.luminance() + 0.05f
+    return maxOf(x, y) / minOf(x, y)
 }

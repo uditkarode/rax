@@ -71,6 +71,12 @@ internal class TerminalController(
     /** Shows the software keyboard; set by the platform input modifier while it is attached. */
     var showSoftwareKeyboard: () -> Unit = {}
 
+    /** Hides the software keyboard; set by the platform input modifier while it is attached. */
+    var hideSoftwareKeyboard: () -> Unit = {}
+
+    /** Runs after each frame that changed what the terminal shows. */
+    var onFrameUpdated: () -> Unit = {}
+
     var session: GhosttyTerminalSession? = null
         private set
 
@@ -191,7 +197,8 @@ internal class TerminalController(
         if (newSession != null && newSession.clipboard == null) {
             newSession.clipboard = clipboard
         }
-        relayout()
+        // The new session can have another size than the last, and it has not told its transport its size yet.
+        relayout(force = true)
         requestFrame()
     }
 
@@ -275,9 +282,13 @@ internal class TerminalController(
     suspend fun runFrames() {
         for (request in frameRequests) {
             withFrameNanos { }
-            if (updateFrame() == FrameResult.DEFERRED) {
-                delay(SYNC_OUTPUT_RETRY)
-                requestFrame()
+            when (updateFrame()) {
+                FrameResult.UPDATED -> onFrameUpdated()
+                FrameResult.UNCHANGED -> {}
+                FrameResult.DEFERRED -> {
+                    delay(SYNC_OUTPUT_RETRY)
+                    requestFrame()
+                }
             }
         }
     }
@@ -420,6 +431,8 @@ internal class TerminalController(
                 return
             }
         }
+        // Modifiers apply to one key, so text of several characters goes as it is and ends them.
+        if (stickyMods != 0) state.stickyModifiers?.consumeModifiers()
         send(text.encodeToByteArray(), typed = true)
     }
 
@@ -497,7 +510,12 @@ internal class TerminalController(
     }
 
     fun setComposing(text: String?) {
-        composingText = text?.takeIf { it.isNotEmpty() }
+        val value = text?.takeIf { it.isNotEmpty() }
+        // Composing text draws at the cursor, which must be on screen while the user types.
+        if (value != null && composingText == null && (!render.scrollbar.isAtBottom || !followsBottom)) {
+            scrollToBottom()
+        }
+        composingText = value
     }
 
     /** The cursor cell in root coordinates, where input method windows go. */
@@ -531,8 +549,9 @@ internal class TerminalController(
 
     /** Pastes [text], asking first when it could run commands by itself. */
     fun pasteText(text: String) {
-        if (text.isEmpty() || session == null) return
-        if (GhosttyTerminal.isPasteSafe(text)) {
+        if (text.isEmpty()) return
+        val safe = session?.withTerminal { it.isPasteSafe(text) } ?: return
+        if (safe) {
             sendPaste(text)
         } else {
             state.dialogRequest = GhosttyTerminalState.DialogRequest.UnsafePaste { sendPaste(text) }
@@ -577,6 +596,11 @@ internal class TerminalController(
         selectionActive = selected
         requestFrame()
         return selected
+    }
+
+    /** The first and last selected cells now, which [selectionEnds] has only after the next frame. */
+    fun currentSelectionEnds(): Pair<Cell, Cell>? = session?.withTerminal { terminal ->
+        terminal.selectionBounds()?.let { Cell(it[0], it[1]) to Cell(it[2], it[3]) }
     }
 
     fun selectAll() {
@@ -695,26 +719,30 @@ internal class TerminalController(
         }
 
     private fun detectUrlAt(cell: Cell): String? {
-        if (cell.row >= render.rows || render.columns == 0) return null
-        val chars = render.rowText(cell.row)
-        val builder = StringBuilder(render.columns)
-        val columnStart = IntArray(render.columns)
-        for (column in 0 until render.columns) {
-            columnStart[column] = builder.length
-            if (render.flags(column, cell.row) and GhosttyCellFlags.SPACER != 0) continue
-            val length = render.textLength(column, cell.row)
-            val offset = render.textOffset(column, cell.row)
-            if (length == 0 || offset + length > chars.size) {
-                builder.append(' ')
-            } else {
-                builder.appendRange(
-                    chars,
-                    offset,
-                    offset + length
-                )
+        val columns = render.columns
+        if (cell.row !in 0 until render.rows || columns == 0) return null
+        // A URL longer than a row goes on in the rows the terminal soft-wrapped it into.
+        var first = cell.row
+        while (first > 0 && render.continuesRow(first)) first--
+        var last = cell.row
+        while (last + 1 < render.rows && render.continuesRow(last + 1)) last++
+        val pressColumn = cell.column.fastCoerceIn(0, columns - 1)
+        val builder = StringBuilder(columns * (last - first + 1))
+        var pressIndex = 0
+        for (row in first..last) {
+            val chars = render.rowText(row)
+            for (column in 0 until columns) {
+                if (row == cell.row && column == pressColumn) pressIndex = builder.length
+                if (render.flags(column, row) and GhosttyCellFlags.SPACER != 0) continue
+                val length = render.textLength(column, row)
+                val offset = render.textOffset(column, row)
+                if (length == 0 || offset + length > chars.size) {
+                    builder.append(' ')
+                } else {
+                    builder.appendRange(chars, offset, offset + length)
+                }
             }
         }
-        val pressIndex = columnStart[cell.column.fastCoerceIn(0, render.columns - 1)]
         return state.urlPattern.findAll(builder)
             .firstOrNull { pressIndex in it.range }
             ?.value

@@ -82,6 +82,12 @@ class Connections(
     private val _alerts = MutableSharedFlow<Pair<Host, Alert>>(extraBufferCapacity = 64)
     val alerts: SharedFlow<Pair<Host, Alert>> = _alerts.asSharedFlow()
 
+    private val connectivity = app.getSystemService(ConnectivityManager::class.java)
+    private val _online = MutableStateFlow(connectivity.activeNetwork != null)
+
+    /** Whether the phone has a network at all. */
+    val online: StateFlow<Boolean> = _online.asStateFlow()
+
     private val inForeground = MutableStateFlow(false)
     private var backgroundJob: Job? = null
 
@@ -128,10 +134,15 @@ class Connections(
                 }
             }
         }
-        val connectivity = app.getSystemService(ConnectivityManager::class.java)
         connectivity.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                _online.value = true
                 _live.value.values.forEach { it.rex.retryNow() }
+            }
+
+            // The default network's callback hears of a loss only when no network takes its place.
+            override fun onLost(network: Network) {
+                _online.value = false
             }
         })
     }

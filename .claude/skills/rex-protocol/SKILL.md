@@ -69,6 +69,9 @@ says Rex is newer. Before raising Rax's revision, read the schema diff (see "Whe
   the app comes to the foreground, when the default network changes, and on Retry. It does
   nothing while connected, and a connection clears an earlier wake, so a later drop still waits
   its backoff.
+- A connection counts as working once `RexHost`'s bootstrap succeeds (`markWorking`). Only a drop
+  after that starts the count again, so a connection that fails during setup each time shows as
+  failing.
 - A lost connection or an unreachable attempt often passes within a few seconds on a phone, so
   Home and the terminal show it only once `failingMs` reaches 3 s. A slow attempt, such as a
   10 s connect timeout, shows when it ends. A TLS failure, a refusal, a server that is not Rex,
@@ -118,7 +121,14 @@ REJECT reasons that matter:
 - Right after the user leaves a pane and opens it again, the old close can still be in flight.
   Rax retries every 250 ms for this reason before it falls back to backoff.
 - After a network change, Rex can believe the old socket is still alive until its keepalive gives
-  up (pings every 120 s, 60 s to answer). RESUME is what replaces a dropped data connection.
+  up (pings every 120 s, 60 s to answer). RESUME is what replaces a dropped data connection, and
+  it ends the old one whatever Rex answers (observed with the exact count, too many and too few).
+  `RexHost.dataTokens` keeps each pane's last WELCOME token after its stream's flow ends. When a
+  HELLO gets `0x02` and a token is saved, `TerminalStream` sends a RESUME with that token and a
+  count of 0, which Rex rejects with `0x03`, and then sends a new HELLO.
+
+Rex takes input (`com.superlogical.terminal.write`) as a JSON string, so `PaneInput` drops input
+that is not UTF-8, such as a mouse report in the X10 format past column 95.
 
 Close code 4000 means the pane closed. `data.connect` failing with `not_found` or
 `session_not_found` also means it is gone. Close code 1013 means Rex no longer has the stream, so

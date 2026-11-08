@@ -189,16 +189,19 @@ fun tabRow(
     )
 }
 
-private fun linkOf(r: Resources, host: Host, state: HostState?): Link = when (val l = state?.link) {
-    null, RexClient.State.Stopped, is RexClient.State.Connected -> Link.Connecting
-    // The first attempt, or one the user or the app just asked for, shows as connecting. Later
-    // attempts keep what the attempt before showed.
-    is RexClient.State.Connecting -> l.lastProblem?.takeIf { l.attempt > 0 && shows(it, l.failingMs) }
-        ?.let { Link.Offline(problemText(r, it, host.tailnet)) }
-        ?: Link.Connecting
-    is RexClient.State.Down ->
-        if (l.retryInMs == null || shows(l.problem, l.failingMs)) Link.Offline(problemText(r, l.problem, host.tailnet))
-        else Link.Connecting
+private fun linkOf(r: Resources, host: Host, state: HostState?, online: Boolean): Link {
+    val problem = when (val l = state?.link) {
+        null, RexClient.State.Stopped, is RexClient.State.Connected -> null
+        // The first attempt, or one the user or the app just asked for, shows as connecting. Later
+        // attempts keep what the attempt before showed.
+        is RexClient.State.Connecting -> l.lastProblem?.takeIf { l.attempt > 0 && shows(it, l.failingMs) }
+        is RexClient.State.Down -> l.problem.takeIf { l.retryInMs == null || shows(it, l.failingMs) }
+    } ?: return Link.Connecting
+    // Rax connects again by itself once the phone has a network.
+    if (!online && (problem is Problem.Unreachable || problem is Problem.Closed)) {
+        return Link.Offline(r.getString(R.string.problem_phone_offline), retryable = false)
+    }
+    return Link.Offline(problemText(r, problem, host.tailnet))
 }
 
 /**
@@ -225,12 +228,12 @@ fun hostLink(r: Resources, host: Host, state: HostState?, access: Access): Link 
                 if (tailnet.loggingRequired) Link.Offline(r.getString(R.string.problem_tailnet_logging), retryable = false)
                 else Link.Offline(r.getString(R.string.problem_tailnet_failed))
             TailnetStatus.Stopped, TailnetStatus.Starting -> Link.Connecting
-            is TailnetStatus.Running -> linkOf(r, host, state)
+            is TailnetStatus.Running -> linkOf(r, host, state, access.online)
         }
         // A name that was not looked up yet shows as connecting until the lookup tells.
         !access.localNetwork && (LocalNetwork.covers(endpoint.host) ?: access.localNames[endpoint.host] ?: false) ->
             Link.Blocked(Need.LocalNetwork)
-        else -> linkOf(r, host, state)
+        else -> linkOf(r, host, state, access.online)
     }
 }
 
@@ -244,17 +247,23 @@ fun addressProblem(r: Resources, reason: RexEndpoint.Companion.Reason): String =
 )
 
 /**
- * Home for [hosts]. [before] is the Home built last, whose hosts that showed a problem keep their
+ * Home for [hosts]. The hosts in [offlineBefore] showed a problem on Home before, and keep their
  * sessions hidden until they are online again.
  */
-fun buildHome(r: Resources, hosts: List<Host>, states: Map<String, HostState>, access: Access, before: HomeState? = null): HomeState {
+fun buildHome(
+    r: Resources,
+    hosts: List<Host>,
+    states: Map<String, HostState>,
+    access: Access,
+    offlineBefore: Set<String> = emptySet(),
+): HomeState {
     val offline = HashSet<String>()
     val cards = hosts.map { host ->
         val state = states[host.id]
         val loaded = state?.loaded == true
         // Home waits for the first load, so rows do not change one by one as their facts arrive.
         val link = hostLink(r, host, state, access).let { if (it is Link.Online && !loaded) Link.Connecting else it }
-        val wasOffline = before != null && host.id in before.offline
+        val wasOffline = host.id in offlineBefore
         if (link is Link.Offline || link is Link.Blocked || (link == Link.Connecting && wasOffline)) offline += host.id
         // While a host connects again after a short drop, Home keeps what it showed before.
         val shown = link is Link.Online || (link == Link.Connecting && loaded && !wasOffline)

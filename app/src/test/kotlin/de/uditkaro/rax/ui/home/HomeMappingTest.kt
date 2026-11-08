@@ -164,8 +164,8 @@ class HomeMappingTest {
         val offline = buildHome(r, listOf(lan), mapOf("a" to down), access)
         // The user asks to try again: the host connects, with its old sessions still in memory.
         val retrying = down.copy(link = RexClient.State.Connecting(attempt = 0))
-        assertEquals(emptyList<SessionGroup>(), buildHome(r, listOf(lan), mapOf("a" to retrying), access, before = offline).hosts.single().sessions)
-        val back = buildHome(r, listOf(lan), mapOf("a" to online.copy(sessions = sessions)), access, before = offline)
+        assertEquals(emptyList<SessionGroup>(), buildHome(r, listOf(lan), mapOf("a" to retrying), access, offlineBefore = offline.offline).hosts.single().sessions)
+        val back = buildHome(r, listOf(lan), mapOf("a" to online.copy(sessions = sessions)), access, offlineBefore = offline.offline)
         assertEquals(listOf("s1"), back.hosts.single().sessions.map { it.id })
         assertEquals(emptySet<String>(), back.offline)
     }

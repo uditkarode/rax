@@ -1,5 +1,6 @@
 package de.uditkaro.rax.rex
 
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -90,6 +91,12 @@ class RexHost(
 ) {
     val client = RexClient(endpoint, httpClient, identity, scope)
 
+    /**
+     * The last WELCOME token of each pane's data stream, by block ID, kept after the stream's flow ends. A socket
+     * that dropped without a close can stay open on Rex, and only a RESUME with its token ends it.
+     */
+    internal val dataTokens = ConcurrentHashMap<String, ByteArray>()
+
     private val _state = MutableStateFlow(HostState())
     val state: StateFlow<HostState> = _state.asStateFlow()
 
@@ -170,6 +177,7 @@ class RexHost(
                 }
             }
             is Msg.Bootstrapped -> if (m.gen == gen) {
+                _state.value.welcome?.let(client::markWorking)
                 bootstrapped = true
                 bootstrapSeq = m.seq
                 // A restarted server can reuse session and pane IDs and count their revisions from the

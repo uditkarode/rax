@@ -98,6 +98,8 @@ only when there are at least two sessions; with one session, the waiting tab's o
 - With the keyboard open, a key row above it gives Esc, Tab, Ctrl, Alt and arrows. Ctrl and Alt
   apply to the next key on a tap and stay on after a double tap. Arrows repeat while held. Holding
   Tab sends Shift+Tab.
+- In a short window, such as a phone in landscape, the pane switcher sits next to the dock, and the
+  top bar hides while the keyboard is open, so the terminal keeps some rows.
 - The terminal area is never blank without a reason on screen. It shows loading, the terminal,
   reconnecting over the last screen, or a message with one action. See `pane-pipeline`.
 - While a message covers the last screen, the screen takes no touches and the keys are off, and

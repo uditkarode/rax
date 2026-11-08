@@ -119,6 +119,14 @@ public class GhosttyTerminalState {
         controller?.showSoftwareKeyboard?.invoke()
     }
 
+    /**
+     * Hides the software keyboard and ends the input method's session, so the keyboard does not come back by itself
+     * when the app returns. The terminal keeps input focus, so a hardware keyboard still types into it.
+     */
+    public fun hideKeyboard() {
+        controller?.hideSoftwareKeyboard?.invoke()
+    }
+
     internal var focusRequester: FocusRequester? = null
 
     internal fun focusTerminal() {

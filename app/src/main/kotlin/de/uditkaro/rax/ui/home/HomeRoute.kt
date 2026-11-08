@@ -25,12 +25,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.launch
 
 @Composable
@@ -92,31 +90,23 @@ fun HomeRoute(graph: AppGraph, system: SystemActions, open: (Screen) -> Unit) {
 
 /**
  * Home as the hosts and their connections change, built off the main thread. Null until the hosts
- * are read. It lives as long as Home is in the back stack, because each Home is built from the one
- * before it.
+ * are read. The hosts Home showed with a problem are kept in [AppGraph.offlineOnHome], which
+ * outlives this model.
  */
-private class HomeViewModel(graph: AppGraph, r: Resources) : ViewModel() {
-    private val initial = homeNow(graph, r)
-
-    val home: StateFlow<HomeState?> = combine(
-        graph.connections.hosts,
-        graph.connections.states,
-        graph.tailnet.status,
-        graph.localNetwork.granted,
-        graph.localNetwork.names,
-    ) { hosts, states, tailnet, local, names -> Inputs(hosts, states, Access(tailnet, local, names)) }
-        .scan(initial) { before, i -> i.hosts?.let { buildHome(r, it, i.states, i.access, before) } }
-        .drop(1)
+private class HomeViewModel(private val graph: AppGraph, private val r: Resources) : ViewModel() {
+    val home: StateFlow<HomeState?> = combine(graph.connections.hosts, graph.connections.states, graph.access) { hosts, states, access ->
+        hosts?.let { build(it, states, access) }
+    }
         .flowOn(Dispatchers.Default)
         .conflate()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, initial)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, homeNow())
 
-    private class Inputs(val hosts: List<Host>?, val states: Map<String, HostState>, val access: Access)
+    private fun build(hosts: List<Host>, states: Map<String, HostState>, access: Access): HomeState =
+        buildHome(r, hosts, states, access, graph.offlineOnHome.value).also { graph.offlineOnHome.value = it.offline }
 
     /** Home as it is now, for the first frame. */
-    private fun homeNow(graph: AppGraph, r: Resources): HomeState? {
+    private fun homeNow(): HomeState? {
         val hosts = graph.connections.hosts.value ?: return null
-        val access = Access(graph.tailnet.status.value, graph.localNetwork.granted.value, graph.localNetwork.names.value)
-        return buildHome(r, hosts, graph.connections.states.value, access)
+        return build(hosts, graph.connections.states.value, graph.access.value)
     }
 }

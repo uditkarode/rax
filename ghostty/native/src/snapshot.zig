@@ -16,7 +16,7 @@ comptime {
     std.debug.assert(builtin.cpu.arch.endian() == .little);
 }
 
-pub const version: i32 = 2;
+pub const version: i32 = 3;
 
 /// Returned instead of a row count when the snapshot could not be taken.
 pub const failed: i32 = -1;
@@ -45,6 +45,10 @@ pub const RowHeader = extern struct {
     selection_start: i32,
     selection_end: i32,
     text_units: i32,
+    flags: i32,
+
+    /// The row continues the row above, which the terminal soft-wrapped into it.
+    pub const continues: i32 = 1 << 0;
 };
 
 pub const Cell = extern struct {
@@ -58,7 +62,7 @@ pub const Cell = extern struct {
 
 comptime {
     std.debug.assert(@sizeOf(Header) == 60);
-    std.debug.assert(@sizeOf(RowHeader) == 16);
+    std.debug.assert(@sizeOf(RowHeader) == 20);
     std.debug.assert(@sizeOf(Cell) == 16);
 }
 
@@ -116,12 +120,13 @@ pub fn write(session: *Session, buf: []u8) i32 {
     const rows = state.row_data.slice();
     for (
         rows.items(.dirty),
+        rows.items(.raw),
         rows.items(.selection),
         rows.items(.cells),
         0..,
-    ) |dirty, selection, cells, y| {
+    ) |dirty, raw, selection, cells, y| {
         if (state.dirty != .full and !dirty) continue;
-        writer.row(@intCast(y), selection, cells.slice(), &state.colors.palette) catch {
+        writer.row(@intCast(y), raw, selection, cells.slice(), &state.colors.palette) catch {
             header.truncated = 1;
             break;
         };
@@ -144,6 +149,7 @@ const RowWriter = struct {
     fn row(
         self: *RowWriter,
         index: i32,
+        raw_row: vt.page.Row,
         selection: ?[2]u16,
         cells: std.MultiArrayList(vt.RenderState.Cell).Slice,
         palette: *const vt.color.Palette,
@@ -179,6 +185,7 @@ const RowWriter = struct {
             .selection_start = if (selection) |s| s[0] else -1,
             .selection_end = if (selection) |s| s[1] else -1,
             .text_units = @intCast(text.units),
+            .flags = if (raw_row.wrap_continuation) RowHeader.continues else 0,
         };
         @memcpy(self.buf[row_offset..][0..@sizeOf(RowHeader)], std.mem.asBytes(&header));
         self.offset = end;

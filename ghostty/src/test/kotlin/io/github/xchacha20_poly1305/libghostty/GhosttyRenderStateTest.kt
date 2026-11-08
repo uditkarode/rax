@@ -37,6 +37,16 @@ class GhosttyRenderStateTest {
     private fun update(state: GhosttyRenderState) = session.withTerminal { state.update(it) }!!
 
     @Test
+    fun marksRowsThatContinueASoftWrap() {
+        val state = GhosttyRenderState()
+        write("a".repeat(25) + "\r\nb")
+        update(state)
+        assertFalse(state.continuesRow(0))
+        assertTrue(state.continuesRow(1))
+        assertFalse(state.continuesRow(2))
+    }
+
+    @Test
     fun readsGridCursorAndColors() {
         write("\u001b[1;31mred\u001b[0m plain\r\n\u001b[4:3mwavy\u001b[0m")
         val state = GhosttyRenderState()
