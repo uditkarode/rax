@@ -100,6 +100,8 @@
     <string name="terminal_lost">Lost the connection to this pane</string>
     <string name="terminal_input_dropped">Couldn’t send what you typed</string>
     <string name="terminal_jump_to_bottom">Go to the bottom</string>
+    <string name="text_box_close">Close the text box</string>
+    <string name="text_box_send">Send</string>
     <string name="sending_file">Sending %1$s</string>
     <string name="sending_files">Sending %1$d files</string>
     <string name="sending_stop">Stop sending</string>
@@ -139,6 +141,7 @@
     <string name="action_group_session">Session</string>
     <string name="action_split_right">Split right</string>
     <string name="action_split_down">Split down</string>
+    <string name="action_text_box">Type in a text box</string>
     <string name="action_send_files">Send files</string>
     <string name="action_rename_pane">Rename pane</string>
     <string name="action_close_pane">Close pane</string>
@@ -153,6 +156,8 @@
     <string name="confirm_close_body">The program running in it stops.</string>
     <string name="confirm_close_tab">Close %1$s?</string>
     <string name="confirm_close_tab_body">Every pane in this tab closes, and the programs in them stop.</string>
+    <string name="confirm_close_last_tab_body">It’s the session’s last tab, so the session ends. The programs in it stop.</string>
+    <string name="confirm_close_last_pane_body">It’s the session’s last pane, so the session ends. The program in it stops.</string>
     <string name="confirm_end_session">End %1$s?</string>
     <string name="confirm_end_session_body">Every tab in this session closes on the computer too, and the programs in them stop.</string>
 

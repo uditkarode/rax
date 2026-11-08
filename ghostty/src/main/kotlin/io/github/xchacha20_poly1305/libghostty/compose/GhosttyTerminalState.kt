@@ -96,6 +96,11 @@ public class GhosttyTerminalState {
         controller?.sendKey(key, mods, text)
     }
 
+    /** Pastes [text], asking first when it could run commands by itself. */
+    public fun pasteText(text: String) {
+        controller?.pasteText(text)
+    }
+
     /**
      * Takes files the user puts into the terminal: an image or other file inserted from the keyboard, or pasted
      * while the clipboard holds a file. Without it, the keyboard offers no files and pasting one does nothing.

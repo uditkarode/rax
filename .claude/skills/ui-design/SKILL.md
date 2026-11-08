@@ -117,6 +117,12 @@ with a row to install it, which shows the download's progress and says when it f
   reconnecting over the last screen, or a message with one action. See `pane-pipeline`.
 - While a message covers the last screen, the screen takes no touches and the keys are off, and
   the keyboard closes. While there is no screen, the keys are off too.
+- The terminal takes keys raw, without autocorrect, suggestions or voice input, because a
+  keyboard that edits its own copy of the text drifts from what the terminal shows. "Type in a
+  text box" in the actions sheet opens a field with all of the keyboard's help, in place of the
+  key row and the dock, until it is closed. Send pastes the text into the pane and presses Return.
+- Closing a session's last tab, or the last pane of its last tab, ends the session, as on the
+  desktop, and the confirmation says so.
 - Files go to the computer from Send files in the actions sheet, from images the keyboard inserts,
   and from Paste while the clipboard holds a file. The pane gets their paths, as a file dropped on
   a desktop terminal does. While they go out, a pill at the bottom of the terminal shows the

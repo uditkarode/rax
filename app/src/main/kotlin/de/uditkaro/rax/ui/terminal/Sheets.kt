@@ -53,6 +53,7 @@ fun ActionsSheet(
     paneTitle: String,
     sessionName: String,
     onSendFiles: () -> Unit,
+    onTextBox: () -> Unit,
     onDismiss: () -> Unit,
     onLeave: () -> Unit,
 ) {
@@ -61,6 +62,10 @@ fun ActionsSheet(
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var pending by remember { mutableStateOf<Pending?>(null) }
     val sid = vm.sessionId
+    val tabs = vm.host.value?.session(sid)?.view?.tabs.orEmpty()
+    // As on the desktop, a session without tabs ends.
+    val lastTab = tabs.size == 1
+    val lastPane = lastTab && tabs.first().allBlocks.size == 1
     val context = LocalContext.current.applicationContext
     // The sheet is gone by the time an action fails, so the failure shows as a toast.
     fun run(block: suspend () -> Unit) {
@@ -80,6 +85,12 @@ fun ActionsSheet(
             Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
                 SectionHeader(stringResource(R.string.action_group_pane))
                 Group(dividerInset = 52.dp) {
+                    row {
+                        SheetRow(R.drawable.ic_edit_note, stringResource(R.string.action_text_box)) {
+                            onDismiss()
+                            onTextBox()
+                        }
+                    }
                     row {
                         SheetRow(R.drawable.ic_upload, stringResource(R.string.action_send_files)) {
                             onDismiss()
@@ -129,12 +140,28 @@ fun ActionsSheet(
         Pending.RenameTab -> RenameDialog(stringResource(R.string.action_rename_tab), tabTitle, { run { rex.renameTab(sid, windowId, it) } }, onDismiss)
         Pending.RenameSession -> RenameDialog(stringResource(R.string.action_rename_session), sessionName, { run { rex.renameSession(sid, it) } }, onDismiss)
         Pending.ClosePane -> ConfirmDialog(
-            stringResource(R.string.confirm_close_pane, paneTitle), stringResource(R.string.confirm_close_body),
-            stringResource(R.string.action_close_pane), { run { rex.closePane(sid, blockId) } }, onDismiss,
+            stringResource(R.string.confirm_close_pane, paneTitle),
+            stringResource(if (lastPane) R.string.confirm_close_last_pane_body else R.string.confirm_close_body),
+            stringResource(R.string.action_close_pane), {
+                if (lastPane) {
+                    run { rex.endSession(sid) }
+                    onLeave()
+                } else {
+                    run { rex.closePane(sid, blockId) }
+                }
+            }, onDismiss,
         )
         Pending.CloseTab -> ConfirmDialog(
-            stringResource(R.string.confirm_close_tab, tabTitle), stringResource(R.string.confirm_close_tab_body),
-            stringResource(R.string.action_close_tab), { run { rex.closeTab(sid, windowId) } }, onDismiss,
+            stringResource(R.string.confirm_close_tab, tabTitle),
+            stringResource(if (lastTab) R.string.confirm_close_last_tab_body else R.string.confirm_close_tab_body),
+            stringResource(R.string.action_close_tab), {
+                if (lastTab) {
+                    run { rex.endSession(sid) }
+                    onLeave()
+                } else {
+                    run { rex.closeTab(sid, windowId) }
+                }
+            }, onDismiss,
         )
         Pending.EndSession -> ConfirmDialog(
             stringResource(R.string.confirm_end_session, sessionName), stringResource(R.string.confirm_end_session_body),

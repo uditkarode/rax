@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -122,6 +123,9 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
 
     var actions by remember { mutableStateOf(false) }
     var moreKeys by remember { mutableStateOf(false) }
+    var textBox by rememberSaveable { mutableStateOf(false) }
+    // While the text box is open, a tap on the terminal leaves the keyboard with the text box.
+    terminalState.showImeOnTap = !textBox
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, vm) {
@@ -218,7 +222,15 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
             )
         }
 
-        if (imeVisible) {
+        if (textBox) {
+            TextBox(
+                terminal = terminalState,
+                enabled = typing,
+                onFiles = vm::send,
+                onClose = { textBox = false },
+                modifier = if (imeVisible) Modifier else Modifier.windowInsetsPadding(WindowInsets.navigationBars),
+            )
+        } else if (imeVisible) {
             KeyBar(
                 terminal = terminalState,
                 enabled = typing,
@@ -266,6 +278,7 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
             paneTitle = panes.firstOrNull { it.id == target!!.blockId }?.title ?: tab.title,
             sessionName = header.sessionName,
             onSendFiles = { pickFiles.launch(arrayOf("*/*")) },
+            onTextBox = { textBox = true },
             onDismiss = { actions = false },
             onLeave = onBack,
         )

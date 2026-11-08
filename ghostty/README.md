@@ -11,9 +11,6 @@ MIT, see `LICENSE`), Kotlin bindings for Ghostty's libghostty-vt, with these cha
   `snapshot.decode` (`Session.restore` in `native/src/Session.zig`).
 - `GhosttyTerminalState.sendKey` takes modifiers and the key's text, for keys such as Shift+Tab
   and Ctrl+C.
-- The input method sees a plain text field without suggestions instead of a `TYPE_NULL` field, so
-  keyboards offer voice input and gesture typing and show no number row
-  (`TerminalInput.kt`).
 - `GhosttyTerminalState.onReceiveContent` takes the files the keyboard inserts (images, GIFs,
   stickers) and the file that Paste finds on the clipboard (`GhosttyClipboard.getFile`).
 - `build-native.sh` builds the native part, in place of the upstream Gradle plugin, for arm64-v8a
