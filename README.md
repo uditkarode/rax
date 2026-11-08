@@ -15,7 +15,7 @@ live terminal on your phone.
 ## Install
 
 Download the APK from the newest release on the
-[Releases page](https://github.com/uditkarode/rax/releases). Rax needs Android 13 or later.
+[Releases page](https://github.com/uditkarode/rax/releases). Rax needs Android 10 or later.
 
 ## Connect to your computer
 

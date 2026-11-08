@@ -52,7 +52,7 @@ tsversion="${tsversion#v}"
 mkdir -p "$(dirname "$out")"
 PATH="$bin:$PATH" gomobile bind \
   -target=android/arm64,android/amd64 \
-  -androidapi=33 \
+  -androidapi=29 \
   -javapkg=de.uditkaro.rax.tailnet \
   -trimpath \
   -ldflags="-s -w -X tailscale.com/version.longStamp=$tsversion -X tailscale.com/version.shortStamp=$tsversion" \

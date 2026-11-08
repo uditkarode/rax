@@ -68,7 +68,7 @@ case "$command" in
       exit 1
     fi
     rm -rf "$out"
-    for pair in arm64-v8a:aarch64-linux-android.33 x86_64:x86_64-linux-android.33; do
+    for pair in arm64-v8a:aarch64-linux-android.29 x86_64:x86_64-linux-android.29; do
       abi="${pair%%:*}"
       prefix="$here/build/zig-out/$abi"
       rm -rf "$prefix"

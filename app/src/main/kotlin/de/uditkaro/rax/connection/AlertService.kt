@@ -37,7 +37,8 @@ class AlertService : LifecycleService() {
         try {
             val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
-        } catch (e: ForegroundServiceStartNotAllowedException) {
+        } catch (e: IllegalStateException) {
+            if (!startNotAllowed(e)) throw e
             // Started while Rax was in the background; it starts again the next time Rax opens.
             Log.w(TAG, "foreground start not allowed", e)
             stopSelf()
@@ -52,10 +53,15 @@ class AlertService : LifecycleService() {
         fun start(context: Context) {
             try {
                 context.startForegroundService(Intent(context, AlertService::class.java))
-            } catch (e: ForegroundServiceStartNotAllowedException) {
+            } catch (e: IllegalStateException) {
+                if (!startNotAllowed(e)) throw e
                 Log.w(TAG, "foreground start not allowed", e)
             }
         }
+
+        /** Android 12 and later refuse to start a foreground service while the app is in the background. */
+        private fun startNotAllowed(e: IllegalStateException) =
+            Build.VERSION.SDK_INT >= 31 && e is ForegroundServiceStartNotAllowedException
 
         fun stop(context: Context) {
             context.stopService(Intent(context, AlertService::class.java))

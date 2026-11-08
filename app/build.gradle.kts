@@ -17,7 +17,7 @@ android {
 
     defaultConfig {
         applicationId = "de.uditkaro.rax"
-        minSdk = 33
+        minSdk = 29
         targetSdk = 37
         // CI sets these for preview builds.
         versionCode = providers.gradleProperty("rax.versionCode").orNull?.toInt() ?: 1

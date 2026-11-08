@@ -1,12 +1,11 @@
 package de.uditkaro.rax
 
-import android.Manifest
 import android.app.Application
 import de.uditkaro.rax.connection.AlertService
 import de.uditkaro.rax.connection.Alerts
 import de.uditkaro.rax.connection.Connections
 import de.uditkaro.rax.connection.LocalNetwork
-import de.uditkaro.rax.connection.PermissionState
+import de.uditkaro.rax.connection.NotificationAccess
 import de.uditkaro.rax.connection.TailnetKeeper
 import de.uditkaro.rax.data.HostStore
 import de.uditkaro.rax.data.PermissionStore
@@ -56,7 +55,7 @@ class AppGraph(val app: Application) {
 
     val localNetwork = LocalNetwork(app)
 
-    val notifications = PermissionState(app, Manifest.permission.POST_NOTIFICATIONS)
+    val notifications = NotificationAccess(app)
 
     val permissions = PermissionStore(app, scope)
 
@@ -64,8 +63,8 @@ class AppGraph(val app: Application) {
      * Background alerts are on and Rax may post them, so turning notifications off in system settings
      * also stops them. Null until the settings are read from disk.
      */
-    val backgroundAlerts: StateFlow<Boolean?> = combine(settings, notifications.granted) { s, granted ->
-        s?.let { it.backgroundAlerts && granted }
+    val backgroundAlerts: StateFlow<Boolean?> = combine(settings, notifications.allowed) { s, allowed ->
+        s?.let { it.backgroundAlerts && allowed }
     }.stateIn(scope, SharingStarted.Eagerly, null)
 
     private val http = OkHttpClient.Builder()

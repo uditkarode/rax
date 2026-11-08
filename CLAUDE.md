@@ -3,7 +3,7 @@
 Rax is an Android app for [Rex](https://www.superlogical.com/rex), a terminal multiplexer for macOS
 by Superlogical. It lists the sessions, tabs and panes on each computer the user adds, opens a pane
 as a live terminal, and notifies the user when a program in a pane waits for them. Package
-`de.uditkaro.rax`, Android 13 and later, Kotlin and Jetpack Compose.
+`de.uditkaro.rax`, Android 10 and later, Kotlin and Jetpack Compose.
 
 ## Clean room
 

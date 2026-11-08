@@ -43,6 +43,9 @@ explicit address. Everything below uses the isolated server.
   time out, and they are not refused. Rax asks for it the first time a LAN host is saved.
 - On this Mac, adb needs `ADB_LIBUSB=1 ADB_MDNS=0` in its environment, or the adb server fails to
   start.
+- Rax's minimum is Android 10. The AVD `Rax_API_29` (Google APIs, arm64) is that version. The
+  emulator gives old images a graphics path they cannot use, and their display service crashes in a
+  loop, so start it with `-gpu swiftshader_indirect -feature -GuestAngle`.
 - Install the debug build (`de.uditkaro.rax.debug`). It sits next to a release build, with its own
   data.
 - To drive the UI from a script, dump the view tree with `adb shell uiautomator dump`, find a node

@@ -82,5 +82,7 @@ After any rule change, test a release build on a device: R8 problems show up onl
 
 - Background alerts run a foreground service of type `specialUse`, with a subtype property in the
   manifest. Play asks for a written reason for this type when the app is submitted.
-- `ACCESS_LOCAL_NETWORK` and `POST_NOTIFICATIONS` are runtime permissions. Rax asks for them when
-  the user does something that needs them: saving a LAN host, or turning on background alerts.
+- `ACCESS_LOCAL_NETWORK` (Android 17) and `POST_NOTIFICATIONS` (Android 13) are runtime
+  permissions. Rax asks for them when the user does something that needs them: saving a LAN host,
+  or turning on background alerts. Before Android 13, notifications need no permission, and Rax
+  opens the notification settings when the user turned them off.

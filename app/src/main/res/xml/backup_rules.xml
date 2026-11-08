@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and earlier read these rules; later versions read data_extraction_rules.xml. -->
+<full-backup-content>
+    <!-- The tailnet node's keys and imported fonts stay on this phone. -->
+    <exclude domain="file" path="tailnet" />
+    <exclude domain="file" path="fonts" />
+</full-backup-content>

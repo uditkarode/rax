@@ -1,9 +1,18 @@
 package libtailnet
 
 /*
+#cgo CFLAGS: -D__ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__ -Werror=unguarded-availability
 #cgo LDFLAGS: -llog
 #include <stdlib.h>
 #include <android/log.h>
+
+// The NDK offers the level check from Android 11. Before that, INFO and above are logged.
+static int rax_log_loggable(int prio, const char* tag) {
+	if (__builtin_available(android 30, *)) {
+		return __android_log_is_loggable(prio, tag, ANDROID_LOG_INFO);
+	}
+	return prio >= ANDROID_LOG_INFO;
+}
 */
 import "C"
 
@@ -15,7 +24,8 @@ import (
 )
 
 // logTag is the logcat tag. Default level is INFO; to see the node's
-// debug output run: adb shell setprop log.tag.RaxTailnet VERBOSE
+// debug output on Android 11 and later, run:
+// adb shell setprop log.tag.RaxTailnet VERBOSE
 var logTag = C.CString("RaxTailnet")
 
 func setupLogging() {
@@ -35,7 +45,7 @@ func (logWriter) Write(p []byte) (int, error) {
 }
 
 func loggable(prio C.int) bool {
-	return C.__android_log_is_loggable(prio, logTag, C.ANDROID_LOG_INFO) != 0
+	return C.rax_log_loggable(prio, logTag) != 0
 }
 
 func write(prio C.int, msg string) {

@@ -12,7 +12,7 @@ MIT, see `LICENSE`), Kotlin bindings for Ghostty's libghostty-vt, with these cha
 - `GhosttyTerminalState.sendKey` takes modifiers and the key's text, for keys such as Shift+Tab
   and Ctrl+C.
 - `build-native.sh` builds the native part, in place of the upstream Gradle plugin, for arm64-v8a
-  and x86_64 at API level 33.
+  and x86_64 at API level 29.
 - The unit tests run on the JVM against a build of the JNI library for the computer that runs
   them.
 

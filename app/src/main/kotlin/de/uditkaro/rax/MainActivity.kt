@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as SystemSettings
 import androidx.activity.ComponentActivity
@@ -60,7 +61,15 @@ class MainActivity : ComponentActivity() {
 
     private val system = SystemActions(
         askLocalNetwork = { ask(LocalNetwork.PERMISSION) },
-        askNotifications = { ask(Manifest.permission.POST_NOTIFICATIONS) },
+        askNotifications = {
+            when {
+                graph.notifications.allowed.value -> Unit
+                Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED ->
+                    ask(Manifest.permission.POST_NOTIFICATIONS)
+                // With no permission to ask for, only system settings turn notifications on.
+                else -> startActivity(notificationSettings())
+            }
+        },
     )
 
     /** A pane a notification asked to open. */
@@ -84,6 +93,7 @@ class MainActivity : ComponentActivity() {
             SystemBars(theme.dark)
             // The splash screen and the window take their colours from the app's night mode.
             LaunchedEffect(s.appearance) {
+                if (Build.VERSION.SDK_INT < 31) return@LaunchedEffect
                 getSystemService(UiModeManager::class.java).setApplicationNightMode(
                     when (s.appearance) {
                         Appearance.System -> UiModeManager.MODE_NIGHT_AUTO
@@ -153,10 +163,13 @@ class MainActivity : ComponentActivity() {
 
     private fun settingsFor(permission: String): Intent =
         if (permission == Manifest.permission.POST_NOTIFICATIONS) {
-            Intent(SystemSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(SystemSettings.EXTRA_APP_PACKAGE, packageName)
+            notificationSettings()
         } else {
             Intent(SystemSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
         }
+
+    private fun notificationSettings(): Intent =
+        Intent(SystemSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(SystemSettings.EXTRA_APP_PACKAGE, packageName)
 
     @Composable
     private fun SystemBars(dark: Boolean) {

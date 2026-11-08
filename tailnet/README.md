@@ -59,7 +59,8 @@ and without a `VpnService`.
   `Tailnet.get` creates all of them first, and Go's calls then only replace
   values. `AppGraph` makes the `Tailnet` before anything that starts a thread.
 - Logging goes to logcat with tag `RaxTailnet`. By default only INFO and above
-  appear, which is a few lines per start and stop. For the node's full log:
+  appear, which is a few lines per start and stop. For the node's full log on
+  Android 11 and later:
 
   ```
   adb shell setprop log.tag.RaxTailnet VERBOSE
