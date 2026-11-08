@@ -1,5 +1,6 @@
 package de.uditkaro.rax.ui.settings
 
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
@@ -9,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import de.uditkaro.rax.AppGraph
 import de.uditkaro.rax.R
 import de.uditkaro.rax.theme.Rax
@@ -20,6 +22,8 @@ import de.uditkaro.rax.ui.components.NavRow
 import de.uditkaro.rax.ui.components.SectionHeader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private const val REXPOCKET_URL = "https://github.com/leizhiyuan/rexpocket"
 
 private data class Credit(val name: String, val license: String, val asset: String)
 
@@ -42,7 +46,21 @@ fun AcknowledgementsScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -
         Credit("JuliaMono", "OFL-1.1", "fonts/juliamono/LICENSE.txt") +
         Credit("Google Sans Flex", "OFL-1.1", "fonts/google-sans-flex-LICENSE.txt")
 
+    val context = LocalContext.current
     LargeTitleScreen(stringResource(R.string.acknowledgements_title), onBack) {
+        item(key = "idea") {
+            SectionHeader(stringResource(R.string.acknowledgements_idea))
+            Group {
+                row {
+                    NavRow(
+                        "RexPocket",
+                        { CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, REXPOCKET_URL.toUri()) },
+                        value = "leizhiyuan",
+                        trailingIcon = R.drawable.ic_open_in_new,
+                    )
+                }
+            }
+        }
         item(key = "themes") {
             SectionHeader(stringResource(R.string.acknowledgements_themes))
             Group { row { NavRow("Rex", { open(Screen.License("Rex", "licenses/rex-themes.txt")) }, value = "Superlogical") } }

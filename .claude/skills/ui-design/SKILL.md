@@ -43,8 +43,9 @@ out.
   theme, and the appearance setting (system, light or dark) decides which one is active.
 - The accent is for actions only: buttons, links, selection and the cursor. Use `link` for accent
   text and icons. It switches to a readable colour when the theme's accent is too faint.
-- Coloured dots mean connectivity and nothing else (`StatusDot`: filled when the computer is
-  online, a ring when it is not).
+- Coloured dots before a host's name mean connectivity and nothing else (`StatusDot`: filled when
+  the computer is online, a ring when it is not). The one other dot is the accent dot on the
+  settings button for an update.
 - A program that waits for the user is shown with the `warning` colour on its own row or tab.
 - `danger` is only for actions that remove something.
 
@@ -79,9 +80,14 @@ Hosts, then their sessions, then one row per tab: the program running in it, its
 whether it waits for the user. Before each host's name, a dot shows that it is online, a small
 spinner that it is connecting, and a ring that it cannot be reached. Only a host that cannot be
 reached gets a line of text under its name, which says why, with Retry, Sign in or Allow when the
-user can act. A host keeps its sessions on screen while it connects again after a short drop,
-and hides them once it shows a problem, until it is online again. The "Needs you" section appears
-only when there are at least two sessions; with one session, the waiting tab's own row is enough.
+user can act. A host lists its sessions only while it is online, because a list from before a
+drop can be out of date. While it connects, placeholder rows with the sizes of a session's name
+and two tabs stand in for them, so nothing moves when the sessions arrive. The "Needs you" section
+appears only when there are at least two sessions; with one session, the waiting tab's own row is
+enough.
+
+When a newer preview is out, a small accent dot sits on the settings button, and Settings starts
+with a row to install it, which shows the download's progress and says when it failed.
 
 ## Feedback
 

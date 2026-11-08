@@ -173,6 +173,13 @@
     <string name="welcome_tailnet_find">Find Rex on your tailnet</string>
 
     <string name="settings_title">Settings</string>
+    <string name="settings_update_available">Settings, update available</string>
+    <string name="update_to">Update to preview %1$d</string>
+    <string name="update_downloading">Downloading preview %1$d</string>
+    <string name="update_installing">Installing preview %1$d</string>
+    <string name="update_percent">%1$d%%</string>
+    <string name="update_download_failed">Couldn’t download the update. Check the connection and try again.</string>
+    <string name="update_install_failed">Couldn’t install the update.</string>
     <string name="settings_hosts">Hosts</string>
     <string name="settings_appearance">Appearance</string>
     <string name="settings_connection">Connection</string>
@@ -208,4 +215,5 @@
     <string name="acknowledgements_themes">Themes</string>
     <string name="acknowledgements_software">Software</string>
     <string name="acknowledgements_fonts">Fonts</string>
+    <string name="acknowledgements_idea">Inspired by</string>
 </resources>

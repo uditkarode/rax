@@ -254,27 +254,15 @@ fun addressProblem(r: Resources, reason: RexEndpoint.Companion.Reason): String =
 )
 
 /**
- * Home for [hosts]. The hosts in [offlineBefore] showed a problem on Home before, and keep their
- * sessions hidden until they are online again.
+ * Home for [hosts]. A host lists its sessions only while it is online, because what Rax knows from
+ * before a drop can be out of date.
  */
-fun buildHome(
-    r: Resources,
-    hosts: List<Host>,
-    states: Map<String, HostState>,
-    access: Access,
-    offlineBefore: Set<String> = emptySet(),
-): HomeState {
-    val offline = HashSet<String>()
+fun buildHome(r: Resources, hosts: List<Host>, states: Map<String, HostState>, access: Access): HomeState {
     val cards = hosts.map { host ->
         val state = states[host.id]
-        val loaded = state?.loaded == true
         // Home waits for the first load, so rows do not change one by one as their facts arrive.
-        val link = hostLink(r, host, state, access).let { if (it is Link.Online && !loaded) Link.Connecting else it }
-        val wasOffline = host.id in offlineBefore
-        if (link is Link.Offline || link is Link.Blocked || (link == Link.Connecting && wasOffline)) offline += host.id
-        // While a host connects again after a short drop, Home keeps what it showed before.
-        val shown = link is Link.Online || (link == Link.Connecting && loaded && !wasOffline)
-        val sessions = if (!shown) emptyList() else state?.sessions.orEmpty().map { s ->
+        val link = hostLink(r, host, state, access).let { if (it is Link.Online && state?.loaded != true) Link.Connecting else it }
+        val sessions = if (link !is Link.Online) emptyList() else state?.sessions.orEmpty().map { s ->
             val name = s.info.label
             SessionGroup(
                 id = s.info.id,
@@ -287,5 +275,5 @@ fun buildHome(
     // With a single session on screen, its waiting tabs already stand out in its own list.
     val waiting = if (cards.sumOf { it.sessions.size } < 2) emptyList()
     else cards.flatMap { c -> c.sessions.flatMap { it.tabs } }.filter { it.waiting }.sortedByDescending { it.waitingSince ?: Long.MIN_VALUE }
-    return HomeState(cards, waiting, offline)
+    return HomeState(cards, waiting)
 }

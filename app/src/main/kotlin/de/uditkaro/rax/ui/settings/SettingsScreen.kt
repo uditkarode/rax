@@ -1,10 +1,24 @@
 package de.uditkaro.rax.ui.settings
 
+import android.text.format.Formatter
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.uditkaro.rax.AppGraph
 import de.uditkaro.rax.BuildConfig
@@ -20,8 +34,11 @@ import de.uditkaro.rax.ui.components.Footnote
 import de.uditkaro.rax.ui.components.Group
 import de.uditkaro.rax.ui.components.ToggleRow
 import de.uditkaro.rax.ui.terminal.rememberTerminalFontFamily
+import de.uditkaro.rax.update.Failure
+import de.uditkaro.rax.update.UpdateState
 import de.uditkaro.rax.ui.components.LargeTitleScreen
 import de.uditkaro.rax.ui.components.NavRow
+import de.uditkaro.rax.ui.components.RaxIcon
 import de.uditkaro.rax.ui.components.RowBase
 import de.uditkaro.rax.ui.components.SectionHeader
 
@@ -36,9 +53,20 @@ fun SettingsScreen(graph: AppGraph, system: SystemActions, onBack: (() -> Unit)?
     val hosts by graph.connections.hosts.collectAsStateWithLifecycle()
     val tailnet by graph.tailnet.status.collectAsStateWithLifecycle()
     val notificationsAllowed by graph.notifications.allowed.collectAsStateWithLifecycle()
+    val update by graph.updater.state.collectAsStateWithLifecycle()
     val mono = rememberTerminalFontFamily(graph, s.fontId)
 
     LargeTitleScreen(stringResource(R.string.settings_title), onBack) {
+        if (update !is UpdateState.None) {
+            item(key = "update") {
+                Group(Modifier.padding(top = 16.dp)) { row { UpdateRow(update, graph.updater::install) } }
+                when ((update as? UpdateState.Available)?.failed) {
+                    Failure.Download -> Footnote(stringResource(R.string.update_download_failed))
+                    Failure.Install -> Footnote(stringResource(R.string.update_install_failed))
+                    null -> Unit
+                }
+            }
+        }
         item(key = "hosts") {
             SectionHeader(stringResource(R.string.settings_hosts))
             Group {
@@ -102,5 +130,42 @@ fun SettingsScreen(graph: AppGraph, system: SystemActions, onBack: (() -> Unit)?
                 row { NavRow(stringResource(R.string.acknowledgements_title), { open(Screen.Acknowledgements) }) }
             }
         }
+    }
+}
+
+/** A newer preview: the button to install it, or how far the download is. */
+@Composable
+private fun UpdateRow(update: UpdateState, onInstall: () -> Unit) {
+    val c = Rax.colors
+    val context = LocalContext.current
+    when (update) {
+        is UpdateState.Available -> RowBase(onInstall) {
+            RaxIcon(R.drawable.ic_download, null, tint = c.link, size = 22.dp)
+            Text(stringResource(R.string.update_to, update.release.number), Modifier.weight(1f), style = RaxType.body, color = c.link)
+            Text(Formatter.formatShortFileSize(context, update.release.size), style = RaxType.body, color = c.textSecondary)
+        }
+        is UpdateState.Downloading, is UpdateState.Installing -> {
+            val downloading = update as? UpdateState.Downloading
+            val number = downloading?.release?.number ?: (update as UpdateState.Installing).release.number
+            val progress by animateFloatAsState(downloading?.progress ?: 1f, label = "progress")
+            Box(Modifier.semantics { progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f) }) {
+                RowBase(onClick = null) {
+                    RaxIcon(R.drawable.ic_download, null, tint = c.textTertiary, size = 22.dp)
+                    Text(
+                        stringResource(if (downloading != null) R.string.update_downloading else R.string.update_installing, number),
+                        Modifier.weight(1f),
+                        style = RaxType.body,
+                        color = c.text,
+                    )
+                    if (downloading != null) {
+                        Text(stringResource(R.string.update_percent, (downloading.progress * 100).toInt()), style = RaxType.body, color = c.textSecondary)
+                    }
+                }
+                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(c.stroke)) {
+                    Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(c.accent))
+                }
+            }
+        }
+        UpdateState.None -> Unit
     }
 }

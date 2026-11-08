@@ -11,6 +11,9 @@ MIT, see `LICENSE`), Kotlin bindings for Ghostty's libghostty-vt, with these cha
   `snapshot.decode` (`Session.restore` in `native/src/Session.zig`).
 - `GhosttyTerminalState.sendKey` takes modifiers and the key's text, for keys such as Shift+Tab
   and Ctrl+C.
+- The input method sees a plain text field without suggestions instead of a `TYPE_NULL` field, so
+  keyboards offer voice input and gesture typing and show no number row
+  (`TerminalInput.kt`).
 - `build-native.sh` builds the native part, in place of the upstream Gradle plugin, for arm64-v8a
   and x86_64 at API level 29.
 - The unit tests run on the JVM against a build of the JNI library for the computer that runs

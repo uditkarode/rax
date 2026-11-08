@@ -47,6 +47,9 @@ example `studio-rex.tail1234.ts.net`.
 
 ## Credits
 
+The idea for Rax comes from [RexPocket](https://github.com/leizhiyuan/rexpocket), an earlier
+Android client for Rex.
+
 Rax draws the terminal with [libghostty-cmp](https://github.com/xchacha20-poly1305/libghostty-cmp)
 and [Ghostty](https://ghostty.org), connects over [Tailscale](https://github.com/tailscale/tailscale),
 and shows program logos from [Simple Icons](https://simpleicons.org) and

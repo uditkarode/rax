@@ -17,6 +17,7 @@ import de.uditkaro.rax.tailnet.Tailnet
 import de.uditkaro.rax.tailnet.TailnetStatus
 import de.uditkaro.rax.theme.ThemeCatalog
 import de.uditkaro.rax.ui.home.Access
+import de.uditkaro.rax.update.Updater
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -75,6 +76,13 @@ class AppGraph(val app: Application) {
         .connectTimeout(10, TimeUnit.SECONDS)
         .pingInterval(25, TimeUnit.SECONDS)
         .build()
+
+    /** Finds newer previews of Rax on GitHub and installs them. */
+    val updater = Updater(
+        app,
+        OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build(),
+        scope,
+    )
 
     /** Reaches computers on the tailnet through [tailnet]. */
     val tailnetHttp: OkHttpClient = tailnet.clientBuilder(http).build()
@@ -149,11 +157,6 @@ class AppGraph(val app: Application) {
         syncAlertService()
     }
 
-    /**
-     * The hosts that Home showed with a problem and that have not been online since. Home keeps
-     * their sessions hidden while they connect again, also when Home itself is made again.
-     */
-    val offlineOnHome = MutableStateFlow<Set<String>>(emptySet())
 
     private val _signingOut = MutableStateFlow(false)
 

@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
+import de.uditkaro.rax.update.UpdateState
 import kotlinx.coroutines.launch
 
 @Composable
@@ -82,13 +83,13 @@ fun HomeRoute(graph: AppGraph, system: SystemActions, open: (Screen) -> Unit) {
         )
     }
 
-    HomeScreen(state = home, mono = mono, actions = actions, creating = creating)
+    val update by graph.updater.state.collectAsStateWithLifecycle()
+    HomeScreen(state = home, mono = mono, actions = actions, creating = creating, updateAvailable = update !is UpdateState.None)
 }
 
 /**
  * Home as the hosts and their connections change, built off the main thread. Null until the hosts
- * are read. The hosts Home showed with a problem are kept in [AppGraph.offlineOnHome], which
- * outlives this model.
+ * are read.
  */
 private class HomeViewModel(private val graph: AppGraph, private val r: Resources) : ViewModel() {
     val home: StateFlow<HomeState?> = combine(graph.connections.hosts, graph.connections.states, graph.access) { hosts, states, access ->
@@ -99,7 +100,7 @@ private class HomeViewModel(private val graph: AppGraph, private val r: Resource
         .stateIn(viewModelScope, SharingStarted.Eagerly, homeNow())
 
     private fun build(hosts: List<Host>, states: Map<String, HostState>, access: Access): HomeState =
-        buildHome(r, hosts, states, access, graph.offlineOnHome.value).also { graph.offlineOnHome.value = it.offline }
+        buildHome(r, hosts, states, access)
 
     /** Home as it is now, for the first frame. */
     private fun homeNow(): HomeState? {

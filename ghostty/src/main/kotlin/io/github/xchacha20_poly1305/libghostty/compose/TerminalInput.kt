@@ -186,15 +186,15 @@ private class TerminalInputNode(
 
     private inner class TerminalInputRequest : PlatformTextInputMethodRequest {
         override fun createInputConnection(outAttributes: EditorInfo): InputConnection {
-            // Gboard treats a TYPE_NULL field as one it cannot read back: it sends
-            // Latin keystrokes and backspace as KeyEvents instead of replaying
-            // deleteSurroundingText + commitText against its own copy of the
-            // committed text, which drifts from the terminal after the first
-            // echo, autocorrect or auto-space.
+            // A plain text field keeps the keyboard's voice input and gesture typing, which a
+            // password or TYPE_NULL field turns off. Without suggestions, Gboard commits each
+            // character as it is typed, so programs that read single keys still get them at
+            // once. Its deletes and corrections arrive as deleteSurroundingText, which becomes
+            // backspaces.
             outAttributes.inputType = if (enforceCharBasedInput) {
                 InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             } else {
-                InputType.TYPE_NULL
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             }
             outAttributes.imeOptions = EditorInfo.IME_ACTION_NONE or
                     EditorInfo.IME_FLAG_NO_FULLSCREEN or

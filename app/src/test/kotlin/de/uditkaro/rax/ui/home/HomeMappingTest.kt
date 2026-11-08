@@ -159,25 +159,18 @@ class HomeMappingTest {
     }
 
     @Test
-    fun aHostThatConnectsAgainKeepsItsSessionsAndAFirstLoadShowsNone() {
-        val again = HostState(link = RexClient.State.Down(Problem.Closed(1006, "gone"), 500, attempt = 0), sessions = listOf(session("s1")), loaded = true)
-        assertEquals(listOf("s1"), buildHome(r, listOf(lan), mapOf("a" to again), access).hosts.single().sessions.map { it.id })
-        val first = online.copy(sessions = listOf(session("s1")), loaded = false)
-        val card = buildHome(r, listOf(lan), mapOf("a" to first), access).hosts.single()
-        assertEquals(Link.Connecting, card.link)
-        assertEquals(emptyList<SessionGroup>(), card.sessions)
-    }
-
-    @Test
-    fun aHostThatShowedAProblemShowsItsSessionsOnlyOnceOnlineAgain() {
+    fun aHostListsItsSessionsOnlyWhileOnline() {
         val sessions = listOf(session("s1"))
+        val again = HostState(link = RexClient.State.Down(Problem.Closed(1006, "gone"), 500, attempt = 0), sessions = sessions, loaded = true)
+        val reconnecting = buildHome(r, listOf(lan), mapOf("a" to again), access).hosts.single()
+        assertEquals(Link.Connecting, reconnecting.link)
+        assertEquals(emptyList<SessionGroup>(), reconnecting.sessions)
+        val first = buildHome(r, listOf(lan), mapOf("a" to online.copy(sessions = sessions, loaded = false)), access).hosts.single()
+        assertEquals(Link.Connecting, first.link)
+        assertEquals(emptyList<SessionGroup>(), first.sessions)
         val down = HostState(link = RexClient.State.Down(Problem.Unreachable("x"), 1000, attempt = 3, failingMs = 5_000), sessions = sessions, loaded = true)
-        val offline = buildHome(r, listOf(lan), mapOf("a" to down), access)
-        // The user asks to try again: the host connects, with its old sessions still in memory.
-        val retrying = down.copy(link = RexClient.State.Connecting(attempt = 0))
-        assertEquals(emptyList<SessionGroup>(), buildHome(r, listOf(lan), mapOf("a" to retrying), access, offlineBefore = offline.offline).hosts.single().sessions)
-        val back = buildHome(r, listOf(lan), mapOf("a" to online.copy(sessions = sessions)), access, offlineBefore = offline.offline)
-        assertEquals(listOf("s1"), back.hosts.single().sessions.map { it.id })
-        assertEquals(emptySet<String>(), back.offline)
+        assertEquals(emptyList<SessionGroup>(), buildHome(r, listOf(lan), mapOf("a" to down), access).hosts.single().sessions)
+        val back = buildHome(r, listOf(lan), mapOf("a" to online.copy(sessions = sessions)), access).hosts.single()
+        assertEquals(listOf("s1"), back.sessions.map { it.id })
     }
 }

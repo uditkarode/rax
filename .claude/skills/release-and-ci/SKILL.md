@@ -78,8 +78,24 @@ After any rule change, test a release build on a device: R8 problems show up onl
 3. It publishes the APK as a prerelease named `preview-<run number>`, using the commit message as
    the notes.
 
+## Updates
+
+- A release build checks GitHub's releases when it comes to the foreground, at most every 30
+  minutes (`update/Updater.kt`). The newest `preview-<n>` tag with an APK is an update when `n` is
+  greater than the build's version code. Debug builds do not check, because their application ID
+  differs and a preview would not replace them.
+- Installing streams the APK into a `PackageInstaller` session. The first time, Android asks the
+  user to let Rax install apps, and to confirm the update. Play Protect can also ask to scan the
+  app. After Rax installed itself once, `USER_ACTION_NOT_REQUIRED` lets later updates install
+  without asking (Android 12 and later).
+- Android installs an update only with the same signing key, so a local build, which signs with
+  the debug key, can test everything up to the install, which then fails with
+  `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+
 ## Google Play
 
+- Play does not allow an app to update itself, and it restricts `REQUEST_INSTALL_PACKAGES`. A
+  build for Play must leave out the updater and that permission.
 - Background alerts run a foreground service of type `specialUse`, with a subtype property in the
   manifest. Play asks for a written reason for this type when the app is submitted.
 - `ACCESS_LOCAL_NETWORK` (Android 17) and `POST_NOTIFICATIONS` (Android 13) are runtime

@@ -1,6 +1,12 @@
 package de.uditkaro.rax.ui.home
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,10 +14,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -24,14 +33,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import de.uditkaro.rax.R
 import de.uditkaro.rax.data.Host
@@ -41,6 +55,7 @@ import de.uditkaro.rax.ui.components.ActionRow
 import de.uditkaro.rax.ui.components.Group
 import de.uditkaro.rax.ui.components.IconAction
 import de.uditkaro.rax.ui.components.LargeTitleScreen
+import de.uditkaro.rax.ui.components.Metrics
 import de.uditkaro.rax.ui.components.PrimaryButton
 import de.uditkaro.rax.ui.components.ProgramGlyph
 import de.uditkaro.rax.ui.components.RaxIcon
@@ -60,12 +75,12 @@ class HomeActions(
 )
 
 @Composable
-fun HomeScreen(state: HomeState, mono: FontFamily, actions: HomeActions, creating: Set<String>) {
+fun HomeScreen(state: HomeState, mono: FontFamily, actions: HomeActions, creating: Set<String>, updateAvailable: Boolean = false) {
     val empty = state.hosts.isEmpty()
     LargeTitleScreen(
         title = stringResource(if (empty) R.string.welcome_title else R.string.home_title),
         onBack = null,
-        actions = { IconAction(R.drawable.ic_settings, stringResource(R.string.settings_title), actions.settings) },
+        actions = { SettingsAction(updateAvailable, actions.settings) },
         bottomBar = if (empty) ({ PrimaryButton(stringResource(R.string.add_host), actions.addHost) }) else null,
     ) {
         if (empty) {
@@ -86,11 +101,38 @@ fun HomeScreen(state: HomeState, mono: FontFamily, actions: HomeActions, creatin
     }
 }
 
+/** Settings, with a dot when an update is out. */
+@Composable
+private fun SettingsAction(updateAvailable: Boolean, onClick: () -> Unit) {
+    val c = Rax.colors
+    Box {
+        IconAction(
+            R.drawable.ic_settings,
+            stringResource(if (updateAvailable) R.string.settings_update_available else R.string.settings_title),
+            onClick,
+        )
+        if (updateAvailable) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 9.dp, end = 9.dp)
+                    .size(11.dp)
+                    .background(c.page, CircleShape)
+                    .padding(2.dp)
+                    .background(c.accent, CircleShape),
+            )
+        }
+    }
+}
+
 private fun LazyListScope.host(card: HostCard, actions: HomeActions, creating: Boolean) {
     item(key = "host-${card.host.id}") { HostHeader(card, actions, creating) }
+    if (card.link == Link.Connecting) {
+        item(key = "host-${card.host.id}-loading") { SessionsPlaceholder(Modifier.animateItem()) }
+    }
     if (card.link is Link.Online && card.sessions.isEmpty()) {
         item(key = "host-${card.host.id}-empty") {
-            Group(Modifier.padding(top = 8.dp)) {
+            Group(Modifier.animateItem().padding(top = 8.dp)) {
                 row {
                     ActionRow(stringResource(R.string.session_new), { actions.newSession(card.host) }, icon = R.drawable.ic_add, enabled = !creating)
                 }
@@ -98,7 +140,47 @@ private fun LazyListScope.host(card: HostCard, actions: HomeActions, creating: B
         }
     }
     card.sessions.forEach { session ->
-        item(key = "session-${card.host.id}-${session.id}") { SessionGroupView(session, actions) }
+        item(key = "session-${card.host.id}-${session.id}") { SessionGroupView(session, actions, Modifier.animateItem()) }
+    }
+}
+
+/**
+ * Stands in for a host's sessions while Rax connects to it, with the same sizes as a session's
+ * name and two of its tabs, so nothing moves when the sessions arrive.
+ */
+@Composable
+private fun SessionsPlaceholder(modifier: Modifier = Modifier) {
+    val c = Rax.colors
+    val pulse by rememberInfiniteTransition(label = "placeholder").animateFloat(
+        initialValue = 1f,
+        targetValue = 0.5f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "pulse",
+    )
+    fun Modifier.shape(width: Dp, height: Dp, alpha: Float, shape: Shape) =
+        size(width, height).graphicsLayer { this.alpha = pulse }.background(c.text.copy(alpha = alpha), shape)
+    fun Modifier.bar(width: Dp, height: Dp, alpha: Float) = shape(width, height, alpha, RoundedCornerShape(height / 2))
+    Column(modifier.clearAndSetSemantics {}) {
+        Box(Modifier.padding(start = 20.dp, top = 14.dp, bottom = 8.dp).height(20.dp), contentAlignment = Alignment.CenterStart) {
+            Box(Modifier.bar(64.dp, 10.dp, 0.09f))
+        }
+        Column(
+            Modifier
+                .padding(horizontal = Metrics.screenPadding)
+                .fillMaxWidth()
+                .clip(Metrics.groupShape)
+                .background(c.card),
+        ) {
+            listOf(92.dp to 148.dp, 124.dp to 104.dp).forEach { (title, detail) ->
+                RowBase(onClick = null) {
+                    Box(Modifier.shape(36.dp, 36.dp, 0.06f, RoundedCornerShape(percent = 25)))
+                    Column {
+                        Box(Modifier.height(22.dp), contentAlignment = Alignment.CenterStart) { Box(Modifier.bar(title, 10.dp, 0.10f)) }
+                        Box(Modifier.height(18.dp), contentAlignment = Alignment.CenterStart) { Box(Modifier.bar(detail, 8.dp, 0.06f)) }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -211,10 +293,10 @@ private fun LinkMark(link: Link) {
 }
 
 @Composable
-private fun SessionGroupView(session: SessionGroup, actions: HomeActions) {
+private fun SessionGroupView(session: SessionGroup, actions: HomeActions, modifier: Modifier = Modifier) {
     val c = Rax.colors
     var open by rememberSaveable(session.id) { mutableStateOf(true) }
-    Column(Modifier.animateContentSize()) {
+    Column(modifier.animateContentSize()) {
         Row(
             Modifier
                 .fillMaxWidth()
