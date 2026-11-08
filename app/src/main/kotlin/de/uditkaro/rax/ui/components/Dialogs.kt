@@ -1,6 +1,7 @@
 package de.uditkaro.rax.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,17 +49,18 @@ fun RenameDialog(title: String, current: String, onRename: (String) -> Unit, onD
             BasicTextField(
                 value = value,
                 onValueChange = { value = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(c.card)
-                    .padding(horizontal = 14.dp, vertical = 12.dp)
-                    .focusRequester(focus),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
                 textStyle = RaxType.body.copy(color = c.text),
                 singleLine = true,
                 cursorBrush = SolidColor(c.accent),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { done() }),
+                // The box around the text is part of the field, so a tap anywhere in it focuses it.
+                decorationBox = { inner ->
+                    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.card).padding(horizontal = 14.dp, vertical = 12.dp)) {
+                        inner()
+                    }
+                },
             )
         },
         confirmButton = { TextButton(onClick = done) { Text(stringResource(R.string.rename), color = c.link) } },

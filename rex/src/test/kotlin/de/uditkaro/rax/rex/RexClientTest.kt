@@ -1,5 +1,6 @@
 package de.uditkaro.rax.rex
 
+import java.net.ServerSocket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -69,5 +70,20 @@ class RexClientTest {
         client.start()
         val hello = rex.nextControl().hello.poll(10, TimeUnit.SECONDS)!!
         assertEquals(first.token, (hello["reconnect_token"] as JsonPrimitive).content)
+    }
+
+    @Test
+    fun retryNowCountsFailedAttemptsFromTheStart() {
+        val port = ServerSocket(0).use { it.localPort }
+        val nobody = (RexEndpoint.parse("127.0.0.1:$port", false) as RexEndpoint.Companion.Parsed.Ok).endpoint
+        val offline = RexClient(nobody, rex.http, ClientIdentity("Rax test", "0", "jvm"), scope)
+        try {
+            offline.start()
+            runBlocking { withTimeout(10_000) { offline.state.first { it is RexClient.State.Down && it.attempt >= 2 } } }
+            offline.retryNow()
+            runBlocking { withTimeout(5_000) { offline.state.first { it is RexClient.State.Down && it.attempt == 0 } } }
+        } finally {
+            offline.stop()
+        }
     }
 }

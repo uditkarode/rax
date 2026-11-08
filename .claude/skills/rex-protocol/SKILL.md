@@ -63,11 +63,20 @@ says Rex is newer. Before raising Rax's revision, read the schema diff (see "Whe
 ## Reconnect and resume
 
 - The control connection retries with backoff, from 500 ms up to 30 s with jitter. It does not
-  retry after `Incompatible` or HTTP 403. `Connections` calls `retryNow()` when the default network
-  changes.
-- Home shows a host as offline from its second failed attempt in a row. A single lost connection
-  or unreachable attempt is common on a phone, so it shows as connecting. A TLS failure, a refusal,
-  a server that is not Rex, or an incompatible one shows at once, because retrying will not fix it.
+  retry after `Incompatible` or HTTP 403.
+- `retryNow()` tries again at once and starts the count again: the attempt number, the backoff
+  and `failingMs`, the time the client has been without a connection. `Connections` calls it when
+  the app comes to the foreground, when the default network changes, and on Retry. It does
+  nothing while connected, and a connection clears an earlier wake, so a later drop still waits
+  its backoff.
+- A lost connection or an unreachable attempt often passes within a few seconds on a phone, so
+  Home and the terminal show it only once `failingMs` reaches 3 s. A slow attempt, such as a
+  10 s connect timeout, shows when it ends. A TLS failure, a refusal, a server that is not Rex,
+  or an incompatible one shows at once, because retrying will not fix it. The attempt after a
+  `retryNow()` shows as connecting, so Retry changes the screen at once.
+- `HostState.loaded` turns true once the sessions' views and their panes' first facts are in, or
+  after 2 s. Home waits for it, so rows do not change one by one. It stays true across
+  reconnects, so Home keeps the sessions while a host connects again after a short drop.
 - A reconnect that sends the reconnect token resumes the same client ID if the server still holds
   it. The server keeps a dropped client for 60 s, and a resumed client gets its panes back.
 - `stop()` closes with 1000, which ends the client on the server at once. `suspendConnection()`

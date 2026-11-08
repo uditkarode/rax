@@ -16,6 +16,7 @@ import de.uditkaro.rax.tailnet.Tailnet
 import de.uditkaro.rax.tailnet.TailnetStatus
 import de.uditkaro.rax.theme.ThemeCatalog
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -124,6 +125,30 @@ class AppGraph(val app: Application) {
             true -> AlertService.start(app)
             false -> AlertService.stop(app)
             null -> Unit
+        }
+    }
+
+    private val _signingOut = MutableStateFlow(false)
+
+    /** A sign-out of Tailscale is under way. */
+    val signingOut: StateFlow<Boolean> = _signingOut.asStateFlow()
+
+    /**
+     * Signs out of Tailscale, once at a time, without tying it to the screen that asked, because it
+     * can take a while. [onFailed] runs on the main thread when Tailscale could not be told.
+     */
+    fun signOut(onFailed: () -> Unit) {
+        if (!_signingOut.compareAndSet(expect = false, update = true)) return
+        scope.launch(Dispatchers.Main) {
+            try {
+                tailnet.logout()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                onFailed()
+            } finally {
+                _signingOut.value = false
+            }
         }
     }
 

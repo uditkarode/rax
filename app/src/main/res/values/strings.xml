@@ -51,6 +51,7 @@
     <string name="tailscale_no_rex_footnote">On the computer, run rex server tailscale on and sign in with the same Tailscale account.</string>
     <string name="tailscale_added">Added</string>
     <string name="tailscale_sign_out">Sign out</string>
+    <string name="tailscale_signing_out">Signing out…</string>
     <string name="tailscale_sign_out_title">Sign out of Tailscale?</string>
     <string name="tailscale_sign_out_body">Rax leaves your tailnet, and hosts that go through Tailscale stop working until you sign in again.</string>
     <string name="tailscale_sign_out_failed">Couldn’t sign out of Tailscale. Try again when the phone is online.</string>
@@ -78,22 +79,39 @@
     <string name="problem_closed">The connection closed</string>
     <string name="problem_tailnet_approval">Waiting for an admin of your tailnet to approve this phone</string>
     <string name="problem_tailnet_failed">Tailscale didn’t start</string>
+    <string name="problem_tailnet_logging">Your tailnet requires network flow logs</string>
 
     <string name="terminal_switch_tab">Switch tab</string>
     <string name="terminal_actions">Pane, tab and session actions</string>
     <string name="terminal_reconnecting">Reconnecting…</string>
-    <string name="terminal_elsewhere">This pane is in use on another device.</string>
+    <string name="terminal_elsewhere">This pane is in use on another device</string>
     <string name="terminal_use_here">Use here</string>
-    <string name="terminal_closed">This pane closed.</string>
-    <string name="terminal_unavailable">This computer is not connected.</string>
+    <string name="terminal_closed">This pane closed</string>
+    <string name="terminal_unavailable">This computer was removed from Rax</string>
     <string name="terminal_connecting">Connecting to %1$s…</string>
     <string name="terminal_loading">Loading…</string>
     <string name="terminal_loading_size">Loading… %1$s</string>
-    <string name="terminal_failed">Couldn’t open this pane.</string>
-    <string name="terminal_lost">Lost the connection to this pane.</string>
-    <string name="terminal_needs_tailnet">Tailscale is signed out. Sign in on the home screen to reach this computer.</string>
-    <string name="terminal_needs_local_network">Rax needs local network access to reach this computer. Allow it on the home screen.</string>
+    <string name="terminal_failed">Couldn’t open this pane</string>
+    <string name="terminal_lost">Lost the connection to this pane</string>
+    <string name="terminal_input_dropped">Couldn’t send what you typed</string>
+    <string name="terminal_jump_to_bottom">Go to the bottom</string>
 
+    <string name="key_esc">Escape</string>
+    <string name="key_ctrl">Control</string>
+    <string name="key_alt">Alt</string>
+    <string name="key_tab">Tab</string>
+    <string name="key_shift_tab">Shift Tab</string>
+    <string name="key_home">Home</string>
+    <string name="key_end">End</string>
+    <string name="key_page_up">Page up</string>
+    <string name="key_page_down">Page down</string>
+    <string name="key_ctrl_c">Control C</string>
+    <string name="key_ctrl_d">Control D</string>
+    <string name="key_ctrl_z">Control Z</string>
+    <string name="key_ctrl_l">Control L</string>
+    <string name="key_ctrl_r">Control R</string>
+    <string name="key_armed">On for the next key</string>
+    <string name="key_locked">Locked on</string>
     <string name="key_left">Left</string>
     <string name="key_right">Right</string>
     <string name="key_up">Up</string>
@@ -131,7 +149,6 @@
     <string name="host_address_placeholder">192.168.1.20:7297</string>
     <string name="host_route">Connection</string>
     <string name="host_tailnet">Through Tailscale</string>
-    <string name="host_tailnet_footnote">Rax joins your tailnet by itself. The rest of the phone stays off it. Login, if required, will be asked for on the home screen.</string>
     <string name="host_summary_plain">Connects to %1$s without encryption, so use it only on a network you trust.</string>
     <string name="host_summary_tls">Connects to %1$s with TLS.</string>
     <string name="host_summary_tailnet">Connects to %1$s through Tailscale.</string>
@@ -147,13 +164,15 @@
     <string name="welcome_lan_body">Start Rex with a port the phone can reach:</string>
     <string name="welcome_lan_warning">Anyone who can reach that port can use this Rex. Use it only on a network you trust.</string>
     <string name="welcome_tailnet_title">Over Tailscale</string>
-    <string name="welcome_tailnet_body">Turn on Tailscale in Rex on the computer, then add it here. Rax joins your tailnet by itself, so the phone needs no VPN.</string>
+    <string name="welcome_tailnet_body">Turn on Tailscale in Rex on the computer. Rax joins your tailnet by itself, so the phone needs no VPN.</string>
+    <string name="welcome_tailnet_find">Find Rex on your tailnet</string>
 
     <string name="settings_title">Settings</string>
     <string name="settings_hosts">Hosts</string>
     <string name="settings_appearance">Appearance</string>
     <string name="settings_connection">Connection</string>
     <string name="settings_background_alerts">Background alerts</string>
+    <string name="settings_allow_notifications">Allow notifications</string>
     <string name="settings_background_alerts_footnote">Stays connected while Rax is in the background, and notifies you when a program waits for permission, an answer or a sign-in.</string>
     <string name="settings_about">About</string>
     <string name="settings_version">Version</string>
@@ -171,11 +190,14 @@
     <string name="font_imported">Added by you</string>
     <string name="font_add">Add font file</string>
     <string name="font_remove">Remove</string>
+    <string name="font_more">More for %1$s</string>
+    <string name="font_size">Font size</string>
     <string name="font_add_footnote">TrueType or OpenType files. Pick the regular, bold and italic files together to get all styles. SF Mono is in Terminal.app on a Mac.</string>
     <string name="font_error_not_font">That file is not a font.</string>
     <string name="font_error_proportional">That font is not monospaced, so its letters cannot line up in a terminal.</string>
     <string name="font_error_unreadable">That file could not be read.</string>
     <string name="font_error_not_saved">The font could not be saved on this phone.</string>
+    <string name="font_error_not_removed">The font could not be removed.</string>
 
     <string name="acknowledgements_title">Acknowledgements</string>
     <string name="acknowledgements_themes">Themes</string>

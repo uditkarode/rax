@@ -2,6 +2,7 @@ package de.uditkaro.rax.ui.home
 
 import android.content.ClipData
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -37,7 +39,7 @@ import kotlinx.coroutines.launch
 const val LAN_COMMAND = "rex server start \\\n  --extra-listen :7297 \\\n  --allow-anonymous"
 
 /** What Home shows before any computer is added: how to make Rex reachable, in two short parts. */
-fun LazyListScope.welcome(mono: FontFamily) {
+fun LazyListScope.welcome(mono: FontFamily, onTailscale: () -> Unit) {
     item(key = "welcome") {
         val c = Rax.colors
         Column(Modifier.padding(horizontal = 20.dp)) {
@@ -50,6 +52,12 @@ fun LazyListScope.welcome(mono: FontFamily) {
 
             Text(stringResource(R.string.welcome_tailnet_title), Modifier.padding(top = 28.dp), style = RaxType.headline, color = c.text)
             Text(stringResource(R.string.welcome_tailnet_body), Modifier.padding(top = 6.dp), style = RaxType.body, color = c.textSecondary)
+            Text(
+                stringResource(R.string.welcome_tailnet_find),
+                Modifier.padding(top = 4.dp).clickable(role = Role.Button, onClick = onTailscale).padding(vertical = 8.dp),
+                style = RaxType.body,
+                color = c.link,
+            )
         }
     }
 }

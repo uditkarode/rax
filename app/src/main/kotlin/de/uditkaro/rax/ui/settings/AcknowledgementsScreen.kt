@@ -8,13 +8,12 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import de.uditkaro.rax.AppGraph
 import de.uditkaro.rax.R
 import de.uditkaro.rax.theme.Rax
+import de.uditkaro.rax.theme.RaxType
 import de.uditkaro.rax.ui.Screen
 import de.uditkaro.rax.ui.components.Group
 import de.uditkaro.rax.ui.components.LargeTitleScreen
@@ -78,7 +77,7 @@ fun LicenseScreen(title: String, asset: String, onBack: () -> Unit) {
                 Text(
                     text.value,
                     Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                    style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp),
+                    style = RaxType.footnote.copy(fontFamily = FontFamily.Monospace),
                     color = Rax.colors.textSecondary,
                 )
             }

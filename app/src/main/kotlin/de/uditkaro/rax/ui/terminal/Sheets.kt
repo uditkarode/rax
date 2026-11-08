@@ -82,13 +82,13 @@ fun ActionsSheet(
                     row {
                         SheetRow(R.drawable.ic_splitscreen_right, stringResource(R.string.action_split_right)) {
                             onDismiss()
-                            run { rex.split(sid, blockId, vertical = false)?.let { vm.show(PaneTarget(windowId, it)) } }
+                            vm.openPane { it.split(sid, blockId, vertical = false)?.let { pane -> PaneTarget(windowId, pane) } }
                         }
                     }
                     row {
                         SheetRow(R.drawable.ic_splitscreen_bottom, stringResource(R.string.action_split_down)) {
                             onDismiss()
-                            run { rex.split(sid, blockId, vertical = true)?.let { vm.show(PaneTarget(windowId, it)) } }
+                            vm.openPane { it.split(sid, blockId, vertical = true)?.let { pane -> PaneTarget(windowId, pane) } }
                         }
                     }
                     row { SheetRow(R.drawable.ic_edit, stringResource(R.string.action_rename_pane)) { pending = Pending.RenamePane } }
@@ -99,9 +99,9 @@ fun ActionsSheet(
                     row {
                         SheetRow(R.drawable.ic_add, stringResource(R.string.action_new_tab)) {
                             onDismiss()
-                            run {
-                                val (w, b) = rex.newTab(sid)
-                                if (w != null && b != null) vm.show(PaneTarget(w, b))
+                            vm.openPane {
+                                val (w, b) = it.newTab(sid)
+                                if (w != null && b != null) PaneTarget(w, b) else null
                             }
                         }
                     }
@@ -167,9 +167,9 @@ fun MoreKeysSheet(terminal: GhosttyTerminalState, onDismiss: () -> Unit) {
         ) {
             keys.forEach { key ->
                 Key(
-                    text = key.label,
+                    text = key.cap,
                     icon = key.icon,
-                    label = key.label ?: key.name,
+                    label = stringResource(key.description),
                     height = 48.dp,
                     repeat = key == TermKey.Left || key == TermKey.Right,
                     onTap = { terminal.press(key) },

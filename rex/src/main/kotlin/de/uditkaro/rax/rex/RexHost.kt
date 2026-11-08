@@ -50,6 +50,11 @@ data class HostState(
     val welcome: Welcome? = null,
     /** False until the session list of the current connection has arrived. */
     val ready: Boolean = false,
+    /**
+     * True once the sessions' views and their panes' facts arrived for the first time, or Rax stopped
+     * waiting for them. It stays true across reconnects, and turns false when the server restarts.
+     */
+    val loaded: Boolean = false,
     val sessions: List<SessionState> = emptyList(),
     /** The facts of every terminal pane in the sessions' views, minimized ones included. */
     val blocks: Map<String, BlockFacts> = emptyMap(),
@@ -101,6 +106,10 @@ class RexHost(
         data class ViewRead(val gen: Int, val sessionId: String, val view: SessionView, val attach: Attach? = null) : Msg
         /** Rex's answer to a read of [fact]; [stamp] is the fact's stamp when the read started. */
         class FactRead(val gen: Int, val sessionId: String, val blockId: String, val fact: Fact, val stamp: Int, val reply: JsonObject) : Msg
+        /** Rex refused a read of [fact] in a way that trying again does not change. */
+        data class FactFailed(val gen: Int, val blockId: String, val fact: Fact) : Msg
+        /** The time to wait for the first load on connection [gen] is over. */
+        data class LoadWaited(val gen: Int) : Msg
         data class Version(val gen: Int, val version: ServerVersion) : Msg
     }
 
@@ -115,6 +124,9 @@ class RexHost(
     private val viewDirty = HashSet<String>()
     /** Panes whose facts were read on this connection. */
     private val factsLoaded = HashSet<String>()
+    /** Whether the first load is under way, and the reads it still waits for. */
+    private var loading = false
+    private val firstReads = HashSet<Pair<String, Fact>>()
 
     /** Counts the events that changed each fact of one pane, so a read that started earlier does not overwrite them. */
     private class Stamps {
@@ -142,6 +154,8 @@ class RexHost(
                 is ClientSignal.Disconnected -> {
                     gen++
                     bootstrapped = false
+                    loading = false
+                    firstReads.clear()
                     _state.update { it.copy(ready = false) }
                 }
                 is ClientSignal.Event -> {
@@ -166,16 +180,26 @@ class RexHost(
                 _state.update { st ->
                     st.copy(
                         ready = true,
+                        loaded = st.loaded && !restarted,
                         server = m.server ?: st.server,
                         sessions = m.sessions.map { info -> keep[info.id]?.copy(info = info, attach = Attach.Pending) ?: SessionState(info) },
                         blocks = if (restarted) emptyMap() else st.blocks.filterValues { f -> m.sessions.any { it.id == f.sessionId } },
                     )
                 }
                 forgetGonePanes()
+                if (!_state.value.loaded) {
+                    loading = true
+                    val g = gen
+                    scope.launch {
+                        delay(LOAD_WAIT_MS)
+                        inbox.send(Msg.LoadWaited(g))
+                    }
+                }
                 m.sessions.forEach { attach(it.id) }
                 val pending = held.toList()
                 held.clear()
                 pending.filter { it.seq > bootstrapSeq }.forEach(::onEvent)
+                checkLoaded()
             }
             is Msg.BootstrapFailed -> if (m.gen == gen) client.dropAndRetry(m.welcome)
             is Msg.ViewRead -> if (m.gen == gen) {
@@ -185,8 +209,18 @@ class RexHost(
                 }
                 applyView(m.sessionId, m.view)
                 if (viewDirty.remove(m.sessionId)) readView(m.sessionId)
+                checkLoaded()
             }
-            is Msg.FactRead -> if (m.gen == gen && m.blockId in _state.value.blocks) applyRead(m)
+            is Msg.FactRead -> if (m.gen == gen) {
+                if (m.blockId in _state.value.blocks) applyRead(m)
+                firstReads -= m.blockId to m.fact
+                checkLoaded()
+            }
+            is Msg.FactFailed -> if (m.gen == gen) {
+                firstReads -= m.blockId to m.fact
+                checkLoaded()
+            }
+            is Msg.LoadWaited -> if (m.gen == gen && loading) finishLoad()
             is Msg.Version -> if (m.gen == gen) _state.update { it.copy(version = m.version) }
         }
     }
@@ -278,6 +312,18 @@ class RexHost(
         factsLoaded += fresh
     }
 
+    /** Ends the first load once every session is attached and the first reads of their panes are back. */
+    private fun checkLoaded() {
+        val st = _state.value
+        if (loading && st.ready && st.sessions.none { it.attach == Attach.Pending } && firstReads.isEmpty()) finishLoad()
+    }
+
+    private fun finishLoad() {
+        loading = false
+        firstReads.clear()
+        _state.update { it.copy(loaded = true) }
+    }
+
     /** Forgets the reads and stamps of panes that are no longer in [HostState.blocks]. */
     private fun forgetGonePanes() {
         val ids = _state.value.blocks.keys
@@ -295,6 +341,7 @@ class RexHost(
     private fun readFact(sessionId: String, blockId: String, fact: Fact) {
         val g = gen
         val stamp = stamp(blockId, fact)
+        if (loading) firstReads += blockId to fact
         scope.launch {
             var failures = 0
             while (true) {
@@ -303,7 +350,10 @@ class RexHost(
                     inbox.send(Msg.FactRead(g, sessionId, blockId, fact, stamp, reply))
                     return@launch
                 }
-                if (!worthRetrying(result.exceptionOrNull(), g)) return@launch
+                if (!worthRetrying(result.exceptionOrNull(), g)) {
+                    inbox.send(Msg.FactFailed(g, blockId, fact))
+                    return@launch
+                }
                 delay(retryDelay(failures++))
                 // A reply on a newer connection would be dropped.
                 if (g != gen) return@launch
@@ -552,6 +602,9 @@ class RexHost(
         put("block", buildJsonObject { put("flavor", "$TERMINAL.shell") })
     }
 }
+
+/** The longest a host's first load waits for slow or failing reads before the host shows what it has. */
+private const val LOAD_WAIT_MS = 2_000L
 
 /** A `file://host/path` URL from OSC 7 as a path; a plain path stays as it is. */
 fun pathOf(pwd: String): String =

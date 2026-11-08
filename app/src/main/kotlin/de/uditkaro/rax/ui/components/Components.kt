@@ -35,9 +35,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -254,7 +254,7 @@ fun CheckRow(
 ) {
     RowBase(
         onClick,
-        modifier.semantics { stateDescription = if (selected) "Selected" else "" },
+        modifier.semantics { this.selected = selected },
         role = Role.RadioButton,
         onLongClick = onLongClick,
     ) {
@@ -284,7 +284,7 @@ fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifi
 
 /** Connectivity only: filled when the computer is reachable, a ring when it is not. */
 @Composable
-fun StatusDot(online: Boolean, modifier: Modifier = Modifier) {
+fun StatusDot(online: Boolean, modifier: Modifier = Modifier, contentDescription: String? = null) {
     val c = Rax.colors
     Box(
         modifier
@@ -294,7 +294,7 @@ fun StatusDot(online: Boolean, modifier: Modifier = Modifier) {
                 if (online) Modifier.background(c.success)
                 else Modifier.border(1.5.dp, c.textSecondary, CircleShape),
             )
-            .semantics { role = Role.Image },
+            .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier),
     )
 }
 

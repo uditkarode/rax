@@ -67,7 +67,10 @@ class Connections(
     private val _live = MutableStateFlow<Map<String, LiveHost>>(emptyMap())
     val live: StateFlow<Map<String, LiveHost>> = _live.asStateFlow()
 
-    val hosts: StateFlow<List<Host>?> = hostStore.hosts.stateIn(scope, SharingStarted.Eagerly, null)
+    private val _hosts = MutableStateFlow<List<Host>?>(null)
+
+    /** The saved hosts, null until they are read. Each host here has its [LiveHost] in [live]. */
+    val hosts: StateFlow<List<Host>?> = _hosts.asStateFlow()
 
     /** Every host's state, by host ID. */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -181,6 +184,7 @@ class Connections(
         }
         (old.keys - next.keys).forEach { id -> old[id]?.let { it.rex.stop(); it.scope.cancel() } }
         _live.value = next
+        _hosts.value = hosts
     }
 
     private companion object {

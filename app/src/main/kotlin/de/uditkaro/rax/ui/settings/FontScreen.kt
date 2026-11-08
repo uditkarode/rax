@@ -1,6 +1,5 @@
 package de.uditkaro.rax.ui.settings
 
-import android.graphics.Typeface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -26,6 +25,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,6 +44,7 @@ import de.uditkaro.rax.ui.components.ActionRow
 import de.uditkaro.rax.ui.components.CheckRow
 import de.uditkaro.rax.ui.components.Footnote
 import de.uditkaro.rax.ui.components.Group
+import de.uditkaro.rax.ui.components.IconAction
 import de.uditkaro.rax.ui.components.LargeTitleScreen
 import de.uditkaro.rax.ui.components.RaxSlider
 import de.uditkaro.rax.ui.components.SectionHeader
@@ -61,7 +65,7 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
     val themes = catalog ?: return
     val theme = activeTheme(s, themes)
     val scope = rememberCoroutineScope()
-    var problem by remember { mutableStateOf<ImportResult.Reason?>(null) }
+    var problem by remember { mutableStateOf<Int?>(null) }
 
     // The slider moves the preview live and writes the size when the finger lifts.
     var size by remember(s.fontSize) { mutableFloatStateOf(s.fontSize) }
@@ -76,7 +80,12 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
                     val added = graph.fonts.importedChoices.value.firstOrNull { it.name == result.names.firstOrNull() }
                     if (added != null) graph.updateSettings { setFont(added.id) }
                 }
-                is ImportResult.Failed -> problem = result.reason
+                is ImportResult.Failed -> problem = when (result.reason) {
+                    ImportResult.Reason.NotAFont -> R.string.font_error_not_font
+                    ImportResult.Reason.NotMonospaced -> R.string.font_error_proportional
+                    ImportResult.Reason.Unreadable -> R.string.font_error_unreadable
+                    ImportResult.Reason.NotSaved -> R.string.font_error_not_saved
+                }
             }
         }
     }
@@ -91,7 +100,8 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
                     .border(1.dp, Rax.colors.stroke, RoundedCornerShape(16.dp))
                     .padding(horizontal = 14.dp, vertical = 12.dp),
             ) {
-                if (terminalFont != null) TerminalPreview(terminalFont, size, theme.terminal)
+                // The system's monospace font holds the preview's place while the font loads.
+                TerminalPreview(terminalFont ?: FontFamily.Monospace, size, theme.terminal)
             }
         }
         item(key = "size") {
@@ -99,19 +109,26 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
                 Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("A", style = RaxType.footnote, color = Rax.colors.textSecondary)
+                Text("A", Modifier.clearAndSetSemantics {}, style = RaxType.footnote, color = Rax.colors.textSecondary)
+                val sizeLabel = stringResource(R.string.font_size)
                 RaxSlider(
                     value = size,
                     onValueChange = { size = it.roundToInt().toFloat() },
                     valueRange = Settings.FONT_SIZES,
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 12.dp)
+                        .semantics {
+                            contentDescription = sizeLabel
+                            stateDescription = size.roundToInt().toString()
+                        },
                     steps = (Settings.FONT_SIZES.endInclusive - Settings.FONT_SIZES.start).toInt() - 1,
                     onValueChangeFinished = { graph.updateSettings { setFontSize(size) } },
                 )
-                Text("A", style = RaxType.title, color = Rax.colors.textSecondary)
+                Text("A", Modifier.clearAndSetSemantics {}, style = RaxType.title, color = Rax.colors.textSecondary)
                 Text(
                     size.roundToInt().toString(),
-                    Modifier.width(36.dp).padding(start = 12.dp),
+                    Modifier.width(36.dp).padding(start = 12.dp).clearAndSetSemantics {},
                     style = RaxType.bodyStrong,
                     color = Rax.colors.text,
                 )
@@ -134,8 +151,8 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
                             graph, font, font.id == s.fontId,
                             onRemove = {
                                 scope.launch {
-                                    if (s.fontId == font.id) graph.updateSettings { setFont(Settings.DEFAULT_FONT) }
-                                    graph.fonts.remove(font.id)
+                                    if (!graph.fonts.remove(font.id)) problem = R.string.font_error_not_removed
+                                    else if (s.fontId == font.id) graph.updateSettings { setFont(Settings.DEFAULT_FONT) }
                                 }
                             },
                         ) { graph.updateSettings { setFont(font.id) } }
@@ -143,21 +160,7 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
                 }
                 row { ActionRow(stringResource(R.string.font_add), onClick = { pick.launch(arrayOf("*/*")) }) }
             }
-            val message = when (problem) {
-                ImportResult.Reason.NotAFont -> stringResource(R.string.font_error_not_font)
-                ImportResult.Reason.NotMonospaced -> stringResource(R.string.font_error_proportional)
-                ImportResult.Reason.Unreadable -> stringResource(R.string.font_error_unreadable)
-                ImportResult.Reason.NotSaved -> stringResource(R.string.font_error_not_saved)
-                null -> null
-            }
-            if (message != null) {
-                Text(
-                    message,
-                    Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
-                    style = RaxType.footnote,
-                    color = Rax.colors.danger,
-                )
-            }
+            problem?.let { Footnote(stringResource(it)) }
             Footnote(stringResource(R.string.font_add_footnote))
         }
     }
@@ -171,7 +174,7 @@ private fun FontRow(
     onRemove: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    val typeface by produceState<Typeface?>(null, font.id) {
+    val typeface by produceState(graph.fonts.cachedPreview(font.id), font.id) {
         value = withContext(Dispatchers.IO) { graph.fonts.preview(font.id) }
     }
     val family = remember(typeface) { typeface?.let { FontFamily(it) } }
@@ -183,6 +186,11 @@ private fun FontRow(
             onClick = onClick,
             onLongClick = if (onRemove != null) ({ menu = true }) else null,
             titleStyle = RaxType.body.copy(fontFamily = family ?: RaxType.body.fontFamily, fontSize = 16.sp),
+            trailing = {
+                if (onRemove != null) {
+                    IconAction(R.drawable.ic_more_horiz, stringResource(R.string.font_more, font.name), { menu = true }, tint = Rax.colors.textSecondary)
+                }
+            },
         )
         if (onRemove != null) {
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {

@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,9 +32,7 @@ import de.uditkaro.rax.ui.components.RaxIcon
 import de.uditkaro.rax.ui.components.RowBase
 import de.uditkaro.rax.ui.components.SectionHeader
 import de.uditkaro.rax.ui.terminal.rememberTerminalFontFamily
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 
 /** Rax's own device on the user's tailnet: signing in and out, and the Rex servers it can reach there. */
@@ -49,30 +46,16 @@ fun TailscaleScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -> Unit)
     val signIn = rememberTailnetSignIn(graph)
     val context = LocalContext.current.applicationContext
     var confirmSignOut by remember { mutableStateOf(false) }
+    val signingOut by graph.signingOut.collectAsStateWithLifecycle()
 
     LifecycleStartEffect(graph) {
         val release = graph.tailnetKeeper.hold()
         onStopOrDispose { release() }
     }
 
-    // Which computers answer as Rex, by MagicDNS name. A computer is asked once, and again when it
-    // comes back online.
-    val online = peers.filter { it.online && it.os?.lowercase() !in phoneSystems }
-    val onlineKey = online.map { it.dnsName }.sorted()
-    val probe = remember(graph) { rexProbeClient(graph.tailnetHttp) }
-    var answers by remember { mutableStateOf<Map<String, RexServer?>>(emptyMap()) }
-    LaunchedEffect(onlineKey, status is TailnetStatus.Running) {
-        if (status !is TailnetStatus.Running) return@LaunchedEffect
-        answers = answers.filterKeys { it in onlineKey }
-        coroutineScope {
-            online.filter { it.dnsName !in answers }.forEach { peer ->
-                launch {
-                    val server = findRexServer(probe, peer)
-                    answers = answers + (peer.dnsName to server)
-                }
-            }
-        }
-    }
+    val discovery = viewModel { RexDiscoveryModel(graph) }
+    val answers by discovery.answers.collectAsStateWithLifecycle()
+    val online = rexCandidates(peers)
     val servers = online.mapNotNull { answers[it.dnsName] }.sortedBy { it.name.lowercase() }
     val looking = online.any { it.dnsName !in answers }
 
@@ -90,16 +73,20 @@ fun TailscaleScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -> Unit)
                     Group(Modifier.padding(top = 16.dp)) { row { InfoRow(stringResource(R.string.tailscale_waiting_approval)) } }
                     Footnote(stringResource(R.string.tailscale_approval_footnote))
                 }
-                item(key = "sign-out") { SignOutGroup { confirmSignOut = true } }
+                item(key = "sign-out") { SignOutGroup(signingOut) { confirmSignOut = true } }
             }
             is TailnetStatus.Error -> {
                 item(key = "error") {
                     Group(Modifier.padding(top = 16.dp)) {
-                        row { ActionRow(stringResource(R.string.link_retry), { graph.scope.launch { graph.tailnet.retry() } }) }
+                        row { InfoRow(stringResource(R.string.problem_tailnet_failed)) }
+                        // Starting again does not help while the tailnet requires flow logs.
+                        if (!s.loggingRequired) {
+                            row { ActionRow(stringResource(R.string.link_retry), { graph.scope.launch { graph.tailnet.retry() } }) }
+                        }
                     }
-                    Footnote(if (s.loggingRequired) stringResource(R.string.tailscale_logging_required) else s.message)
+                    if (s.loggingRequired) Footnote(stringResource(R.string.tailscale_logging_required))
                 }
-                item(key = "sign-out") { SignOutGroup { confirmSignOut = true } }
+                item(key = "sign-out") { SignOutGroup(signingOut) { confirmSignOut = true } }
             }
             is TailnetStatus.Running -> {
                 item(key = "account") {
@@ -131,7 +118,7 @@ fun TailscaleScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -> Unit)
                         }
                     }
                 }
-                item(key = "sign-out") { SignOutGroup { confirmSignOut = true } }
+                item(key = "sign-out") { SignOutGroup(signingOut) { confirmSignOut = true } }
             }
         }
     }
@@ -143,28 +130,25 @@ fun TailscaleScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -> Unit)
             action = stringResource(R.string.tailscale_sign_out),
             onConfirm = {
                 confirmSignOut = false
-                // Signing out can take a while, so the failure shows as a toast on whatever screen is open by then.
-                graph.scope.launch(Dispatchers.Main) {
-                    try {
-                        graph.tailnet.logout()
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: Exception) {
-                        Toast.makeText(context, R.string.tailscale_sign_out_failed, Toast.LENGTH_LONG).show()
-                    }
-                }
+                // The failure shows as a toast on whatever screen is open by then.
+                graph.signOut { Toast.makeText(context, R.string.tailscale_sign_out_failed, Toast.LENGTH_LONG).show() }
             },
             onDismiss = { confirmSignOut = false },
         )
     }
 }
 
-private val phoneSystems = setOf("ios", "android", "tvos")
-
 @Composable
-private fun SignOutGroup(onClick: () -> Unit) {
+private fun SignOutGroup(signingOut: Boolean, onClick: () -> Unit) {
     Group(Modifier.padding(top = 24.dp)) {
-        row { ActionRow(stringResource(R.string.tailscale_sign_out), onClick, destructive = true) }
+        row {
+            ActionRow(
+                stringResource(if (signingOut) R.string.tailscale_signing_out else R.string.tailscale_sign_out),
+                onClick,
+                destructive = true,
+                enabled = !signingOut,
+            )
+        }
     }
 }
 

@@ -99,14 +99,18 @@ class RexClient(
 ) {
     sealed interface State {
         data object Stopped : State
-        /** [attempt] counts from 0 after each connection. [lastProblem] is why the attempt before failed. */
-        data class Connecting(val attempt: Int, val lastProblem: Problem? = null) : State
+        /**
+         * [attempt] counts the attempts that failed since the last connection or the last [retryNow].
+         * [lastProblem] and [failingMs] are those of the attempt before, as in [Down].
+         */
+        data class Connecting(val attempt: Int, val lastProblem: Problem? = null, val failingMs: Long = 0) : State
         data class Connected(val welcome: Welcome) : State
         /**
          * Attempt number [attempt] failed. [retryInMs] is null when retrying cannot help until
-         * something changes, such as an update.
+         * something changes, such as an update. [failingMs] is how long the client had been without a
+         * connection when it failed, counted from the last connection's end, [start] or [retryNow].
          */
-        data class Down(val problem: Problem, val retryInMs: Long?, val attempt: Int) : State
+        data class Down(val problem: Problem, val retryInMs: Long?, val attempt: Int, val failingMs: Long = 0) : State
     }
 
     private val _state = MutableStateFlow<State>(State.Stopped)
@@ -118,8 +122,8 @@ class RexClient(
     val signals: Flow<ClientSignal> = signalChannel.receiveAsFlow()
 
     /**
-     * Guards [loop], and every change a loop makes to [current], [_state], [reconnectToken] and the
-     * signals. Callers start and stop the client from several threads, and a loop that was stopped
+     * Guards [loop], [failures], [failingSince], and every change a loop makes to [current], [_state],
+     * [reconnectToken] and the signals. Callers start and stop the client from several threads, and a loop that was stopped
      * must not undo what [stop] or [suspendConnection] did.
      */
     private val lock = Any()
@@ -128,20 +132,36 @@ class RexClient(
     private val wake = Channel<Unit>(Channel.CONFLATED)
     @Volatile private var reconnectToken: String? = null
     private val nextId = AtomicLong()
+    private var failures = 0
+    private var failingSince = System.nanoTime()
 
     fun start() {
         synchronized(lock) {
             if (loop?.isActive == true) {
-                wake.trySend(Unit)
+                retryNow()
                 return
             }
+            failures = 0
+            failingSince = System.nanoTime()
             val job = scope.launch(start = CoroutineStart.LAZY) { run() }
             loop = job
             job.start()
         }
     }
 
+    /**
+     * Tries again at once, and counts from the start again, for a moment when a new attempt can work:
+     * the app opened, the network changed, or the user asked. An attempt that is under way goes on and
+     * counts as the first. Does nothing while connected.
+     */
     fun retryNow() {
+        synchronized(lock) {
+            val st = _state.value
+            if (st is State.Connected) return
+            failures = 0
+            failingSince = System.nanoTime()
+            if (st is State.Connecting) _state.value = st.copy(attempt = 0)
+        }
         wake.trySend(Unit)
     }
 
@@ -251,11 +271,11 @@ class RexClient(
 
     private suspend fun run() {
         val me = currentCoroutineContext().job
-        var attempt = 0
         while (true) {
             val conn = Connection()
             val opened = whileCurrent(me) {
-                _state.value = State.Connecting(attempt, (_state.value as? State.Down)?.problem)
+                val down = _state.value as? State.Down
+                _state.value = State.Connecting(failures, down?.problem, down?.failingMs ?: 0)
                 current = conn
                 conn.ws = http.newWebSocket(
                     Request.Builder()
@@ -267,7 +287,7 @@ class RexClient(
             }
             if (!opened) return
             try {
-                attempt = connectOnce(me, conn, attempt)
+                connectOnce(me, conn)
             } catch (e: CancellationException) {
                 if (closeFrameOnEnd) conn.ws?.close(1000, null) else conn.ws?.cancel()
                 conn.fail(RexException.notConnected())
@@ -276,20 +296,20 @@ class RexClient(
         }
     }
 
-    /**
-     * Runs one connection until it closes, then waits before the next attempt. Returns the number of
-     * the next attempt.
-     */
-    private suspend fun connectOnce(me: Job, conn: Connection, attemptIn: Int): Int {
-        var attempt = attemptIn
+    /** Runs one connection until it closes, then waits before the next attempt. */
+    private suspend fun connectOnce(me: Job, conn: Connection) {
+        var connected = false
         val problem: Problem = try {
             val welcome = withTimeout(HANDSHAKE_TIMEOUT_MS) { conn.welcome.await() }
             whileCurrent(me) {
+                connected = true
+                failures = 0
+                // A wake from before this connection is not a reason to skip the wait after it.
+                wake.tryReceive()
                 reconnectToken = conn.token
                 _state.value = State.Connected(welcome)
                 signalChannel.trySend(ClientSignal.Connected(welcome))
             }
-            attempt = 0
             conn.closed.await()
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             conn.ws?.cancel()
@@ -302,24 +322,25 @@ class RexClient(
         }
         conn.fail(RexException.notConnected())
 
-        val failed = attempt++
-        val retry = retryDelay(problem, failed)
+        var retry: Long? = null
         val stillCurrent = whileCurrent(me) {
+            val now = System.nanoTime()
+            if (connected) failingSince = now
+            val failed = failures++
+            retry = retryDelay(problem, failed)
             if (current === conn) current = null
             signalChannel.trySend(ClientSignal.Disconnected(problem))
-            _state.value = State.Down(problem, retry, failed)
+            _state.value = State.Down(problem, retry, failed, (now - failingSince) / 1_000_000)
         }
-        if (!stillCurrent) return attempt
-        if (retry == null) {
-            wake.receive()
-            attempt = 0
-        } else {
-            select {
+        if (!stillCurrent) return
+        // retryNow() ends the wait.
+        when (val wait = retry) {
+            null -> wake.receive()
+            else -> select {
                 wake.onReceive {}
-                onTimeout(retry) {}
+                onTimeout(wait) {}
             }
         }
-        return attempt
     }
 
     private fun retryDelay(problem: Problem, attempt: Int): Long? {

@@ -39,11 +39,16 @@ screen. It shows one pane at a time and can switch panes.
    it shows. Output that arrived before Rex drew the screen is already in it, so Rax drops it.
    The size call times a round trip, and Rex's drawing reaches the phone's clock about one round
    trip after the `format` call goes out. The reply itself comes later when the screen is long.
+   If Rex cannot send the screen, the status becomes `Failed` and the stream ends, so the pane
+   shows "Couldn't open this pane" with Retry, and not a blank emulator.
 3. Status becomes Live. Every later `Started` (a stream that could not resume) builds a new
    emulator from the new snapshot.
 
 ## Input and size
 
+- Typing waits up to 15 s for the connection. Input that waited longer, or that Rex refused, is
+  dropped, and Rax says so in a toast. A write whose answer was lost can have reached the pane,
+  so it does not count as dropped.
 - The emulator's transport sends typing through `PaneInput.send`. Rax makes its emulators with
   `repliesToProgram = false`, so they send only what the user types: Rex's own terminal answers
   terminal queries, and it sends the size (mode 2048) and colour scheme (mode 2031) reports
@@ -85,13 +90,13 @@ area is never blank without a reason on screen:
 
 - A host problem comes first: `Failed` with Home's message, such as "Can't reach Rex at this
   address", and Retry when retrying can help. A Tailscale sign-in or local network permission
-  problem gets a message without Retry.
+  problem gets Home's message with Sign in or Allow.
 - The host is still connecting: `Loading` ("Connecting to <host>…"), or `Reconnecting` over the
   last screen if there is one.
 - The host is online: `Live` once the stream has started. With no screen yet it shows `Loading`,
   with the size so far once it passes 512 KB. With a screen it shows `Reconnecting`.
 - If nothing arrives for 20 s while the host is online, the state is `Failed` ("Couldn't open this
-  pane." or "Lost the connection to this pane.") with Retry. The 20 s start when a live
+  pane" or "Lost the connection to this pane") with Retry. The 20 s start when a live
   stream drops, and time spent waiting for the host itself does not count. The stream keeps
   trying underneath and turns Live by itself if it recovers.
 - Retry reconnects the host (and starts the tailnet node for tailnet hosts) and restarts the
@@ -105,7 +110,14 @@ before its font.
 
 `show(target)` with a different pane closes the old emulator first, so the old pane's screen never
 shows while the new one loads. When the shown pane closes (status `Closed`), the ViewModel moves to
-another pane of the tab, or to another tab.
+another pane of the tab, or to another tab. It picks from the view it has, without the closed
+pane, because the view can still list that pane for a moment.
+
+Split and New tab run through `openPane`, one at a time. A spinner takes the place of the actions
+menu until Rex answers, and the screen then shows the new pane.
+
+A notification for a pane of the session that is open already switches that screen to the pane,
+so it keeps its emulator. Any other notification opens the pane on top of Home.
 
 ## `:ghostty` rules
 

@@ -3,6 +3,7 @@ package de.uditkaro.rax.ui.terminal
 import android.app.Application
 import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.uditkaro.rax.R
@@ -24,11 +25,14 @@ import de.uditkaro.rax.ui.home.appName
 import de.uditkaro.rax.ui.home.hostLink
 import de.uditkaro.rax.ui.home.shortPath
 import de.uditkaro.rax.ui.home.tabRow
+import de.uditkaro.rax.ui.showActionFailed
 import io.github.xchacha20_poly1305.libghostty.GhosttyTerminalSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -46,8 +50,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** What the stream of the shown pane is doing. */
-enum class PaneStatus { Opening, Live, Reconnecting, Closed, Unavailable }
+/** What the stream of the shown pane is doing. Failed means the stream ended without a screen to show. */
+enum class PaneStatus { Opening, Live, Reconnecting, Failed, Closed, Unavailable }
+
+/** What the user can do about a [PaneView.Failed]. */
+enum class PaneAction { Retry, SignIn, AllowLocalNetwork }
 
 /** What the terminal area shows. */
 sealed interface PaneView {
@@ -59,7 +66,7 @@ sealed interface PaneView {
     data object Live : PaneView
     /** The terminal keeps the last screen while the connection comes back. */
     data object Reconnecting : PaneView
-    data class Failed(val message: String, val canRetry: Boolean) : PaneView
+    data class Failed(val message: String, val action: PaneAction?) : PaneView
     data object ElsewhereOwned : PaneView
     data object Closed : PaneView
     data object Unavailable : PaneView
@@ -77,7 +84,10 @@ data class PaneHeader(
 )
 
 /** A pane of the shown tab. [label] is the name the user gave it, if any. */
-data class PaneChip(val id: String, val name: String, val label: String?, val waiting: Boolean)
+data class PaneChip(val id: String, val name: String, val label: String?, val waiting: Boolean) {
+    /** What the pane is called on screen. */
+    val title: String get() = label?.takeIf { it.isNotBlank() } ?: name
+}
 
 /**
  * Sends the pane's stream to the terminal emulator and the user's keys to Rex. When the terminal
@@ -184,8 +194,13 @@ class TerminalViewModel(
                 if (status != PaneStatus.Closed || st == null) return@collect
                 val view = st.session(sessionId)?.view ?: return@collect
                 val current = _target.value ?: return@collect
-                val window = view.tabs.firstOrNull { it.id == current.windowId } ?: view.tabs.firstOrNull() ?: return@collect
-                window.primaryBlockId?.takeIf { it != current.blockId }?.let { show(PaneTarget(window.id!!, it)) }
+                // The view can still list the closed pane for a moment, so it is left out here.
+                fun panesLeft(w: WindowView) = w.blocks.filter { it.isTerminal }.mapNotNull { it.id }.filter { it != current.blockId }
+                val window = view.tabs.firstOrNull { it.id == current.windowId }?.takeIf { panesLeft(it).isNotEmpty() }
+                    ?: view.tabs.firstOrNull { it.id != current.windowId && panesLeft(it).isNotEmpty() }
+                    ?: return@collect
+                val next = window.primaryBlockId?.takeIf { it != current.blockId } ?: panesLeft(window).first()
+                show(PaneTarget(window.id!!, next))
             }
         }
         viewModelScope.launch {
@@ -240,15 +255,16 @@ class TerminalViewModel(
             status == PaneStatus.Closed -> PaneView.Closed
             takenElsewhere -> PaneView.ElsewhereOwned
             else -> when (link) {
-                is Link.Offline -> PaneView.Failed(link.message, link.retryable)
-                is Link.Blocked -> PaneView.Failed(
-                    r.getString(if (link.need == Need.TailscaleSignIn) R.string.terminal_needs_tailnet else R.string.terminal_needs_local_network),
-                    canRetry = false,
-                )
+                is Link.Offline -> PaneView.Failed(link.message, PaneAction.Retry.takeIf { link.retryable })
+                is Link.Blocked -> when (link.need) {
+                    Need.TailscaleSignIn -> PaneView.Failed(r.getString(R.string.link_needs_tailnet), PaneAction.SignIn)
+                    Need.LocalNetwork -> PaneView.Failed(r.getString(R.string.link_needs_local_network), PaneAction.AllowLocalNetwork)
+                }
                 null, Link.Connecting -> if (hasScreen) PaneView.Reconnecting else PaneView.Loading(connecting = true, bytes = 0)
                 is Link.Online -> when {
                     status == PaneStatus.Live && hasScreen -> PaneView.Live
-                    stalled -> PaneView.Failed(r.getString(if (hasScreen) R.string.terminal_lost else R.string.terminal_failed), canRetry = true)
+                    status == PaneStatus.Failed -> PaneView.Failed(r.getString(R.string.terminal_failed), PaneAction.Retry)
+                    stalled -> PaneView.Failed(r.getString(if (hasScreen) R.string.terminal_lost else R.string.terminal_failed), PaneAction.Retry)
                     hasScreen -> PaneView.Reconnecting
                     else -> PaneView.Loading(connecting = false, bytes = bytes)
                 }
@@ -271,7 +287,7 @@ class TerminalViewModel(
                 PaneChip(
                     id = block.id!!,
                     name = f?.status?.values?.firstNotNullOfOrNull { it.effectiveApp ?: it.app }?.let(::appName) ?: f?.programName ?: "…",
-                    label = block.label,
+                    label = block.userLabel,
                     waiting = f?.waiting != null,
                 )
             },
@@ -305,7 +321,7 @@ class TerminalViewModel(
         stalled.value = false
         lastProgress = SystemClock.elapsedRealtime()
         // Keys still going out to this pane, such as the rest of a paste, go before new ones.
-        val paneInput = PaneInput(rex, sessionId, target.blockId, viewModelScope, before = oldInput.takeIf { samePane })
+        val paneInput = PaneInput(rex, sessionId, target.blockId, viewModelScope, before = oldInput.takeIf { samePane }, onDropped = ::inputDropped)
         input = paneInput
         theme?.let(paneInput::setTheme)
         // Keys typed on the last screen while the stream comes back go out on the new connection.
@@ -346,7 +362,12 @@ class TerminalViewModel(
             Log.w(TAG, "snapshot did not restore, ${snapshot.size} bytes; redrawing from the screen")
         }
         drawnUntil = Long.MIN_VALUE
-        val session = restored ?: redrawn(target)
+        val session = restored ?: redrawn(target) ?: run {
+            // Without Rex's screen the pane would stay blank until the program draws again.
+            _status.value = PaneStatus.Failed
+            currentCoroutineContext().job.cancel()
+            return
+        }
         var swapped = false
         try {
             // Rewrapping a long scrollback to the phone's grid takes a while; doing it here, before the
@@ -372,14 +393,14 @@ class TerminalViewModel(
 
     /**
      * An emulator with the screen Rex draws as escape sequences, for a snapshot this build cannot read. It starts at
-     * the pane's size on Rex, so rows and the cursor land where Rex has them. Blank if Rex cannot send the screen.
+     * the pane's size on Rex, so rows and the cursor land where Rex has them. Null if Rex cannot send the screen.
      */
-    private suspend fun redrawn(target: PaneTarget): GhosttyTerminalSession {
-        val client = live?.rex?.client ?: return GhosttyTerminalSession(options())
+    private suspend fun redrawn(target: PaneTarget): GhosttyTerminalSession? {
+        val client = live?.rex?.client ?: return null
         val screen = readScreenDump(
             call = { method, args -> client.callBlock(sessionId, target.blockId, method, args) },
             onProgress = { lastProgress = SystemClock.elapsedRealtime() },
-        ) ?: return GhosttyTerminalSession(options())
+        ) ?: return null
         val session = GhosttyTerminalSession(options(screen.columns, screen.rows))
         screen.parts.forEach { session.feedOutput(it) }
         drawnUntil = screen.drawnAt
@@ -419,6 +440,44 @@ class TerminalViewModel(
         }
 
         override fun close() = Unit
+    }
+
+    private val _working = MutableStateFlow(false)
+
+    /** An action that opens a pane, such as a split, waits for Rex. */
+    val working: StateFlow<Boolean> = _working.asStateFlow()
+
+    /**
+     * Runs an action that makes a pane, one at a time, and shows the pane it returns. A failure shows
+     * as a toast.
+     */
+    fun openPane(make: suspend (RexHost) -> PaneTarget?) {
+        val rex = live?.rex ?: return
+        if (_working.value) return
+        _working.value = true
+        viewModelScope.launch {
+            try {
+                make(rex)?.let(::show)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                showActionFailed(getApplication(), e)
+            } finally {
+                _working.value = false
+            }
+        }
+    }
+
+    /** Shows [blockId] of tab [windowId], or the tab's main pane. */
+    fun showTab(windowId: String, blockId: String?) {
+        val block = blockId ?: window(host.value, windowId)?.primaryBlockId ?: return
+        show(PaneTarget(windowId, block))
+    }
+
+    private fun inputDropped() {
+        viewModelScope.launch(Dispatchers.Main) {
+            Toast.makeText(getApplication(), R.string.terminal_input_dropped, Toast.LENGTH_SHORT).show()
+        }
     }
 
     /** Reconnects to the computer if needed and opens the pane's stream again. */

@@ -95,7 +95,16 @@ data class BlockView(
     val owner: String? = null,
 ) {
     val isTerminal: Boolean get() = creator == null || creator == TERMINAL
+
+    /**
+     * The label the user gave the block, or null for one Rex gave it: the flavor's short name for a
+     * new block, or `Block 89abcdef` after the label was cleared.
+     */
+    val userLabel: String?
+        get() = label?.takeIf { it.isNotBlank() && it != flavor?.substringAfterLast('.') && !defaultBlockLabel.matches(it) }
 }
+
+private val defaultBlockLabel = Regex("^Block [0-9a-f]{8}$")
 
 const val TERMINAL = "com.superlogical.terminal"
 

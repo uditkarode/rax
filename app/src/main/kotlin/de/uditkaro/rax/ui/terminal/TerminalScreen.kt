@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -48,7 +49,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,15 +73,18 @@ import de.uditkaro.rax.ui.components.IconAction
 import de.uditkaro.rax.ui.components.PrimaryButton
 import de.uditkaro.rax.ui.components.ProgramGlyph
 import de.uditkaro.rax.ui.components.RaxIcon
+import de.uditkaro.rax.ui.SystemActions
 import de.uditkaro.rax.ui.home.tabRow
+import de.uditkaro.rax.ui.tailnet.rememberTailnetSignIn
 import io.github.xchacha20_poly1305.libghostty.compose.GhosttyDialogs
+import io.github.xchacha20_poly1305.libghostty.compose.GhosttyJumpToBottomButton
 import io.github.xchacha20_poly1305.libghostty.compose.GhosttyTerminal
 import io.github.xchacha20_poly1305.libghostty.compose.rememberGhosttyTerminalState
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
+fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel, onBack: () -> Unit) {
     val c = Rax.colors
     val settings by graph.settings.collectAsStateWithLifecycle()
     val themes by graph.themes.collectAsStateWithLifecycle()
@@ -85,6 +92,8 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
     val target by vm.target.collectAsStateWithLifecycle()
     val session by vm.session.collectAsStateWithLifecycle()
     val view by vm.view.collectAsStateWithLifecycle()
+    val working by vm.working.collectAsStateWithLifecycle()
+    val signIn = rememberTailnetSignIn(graph)
     val s = settings ?: return
     val theme = activeTheme(s, themes ?: return)
     LaunchedEffect(vm, theme) { vm.setTheme(theme.terminal.toPane(theme.dark)) }
@@ -115,6 +124,13 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
     val panes = header.panes
     val imeVisible = WindowInsets.isImeVisible
     val terminalBackground = Color(theme.terminal.background)
+    val hasScreen = session != null && font != null
+    // Keys reach the pane while it shows, and while it reconnects, when they wait for the connection.
+    val typing = hasScreen && (view == PaneView.Live || view == PaneView.Reconnecting)
+    val message = view is PaneView.Failed || view == PaneView.ElsewhereOwned || view == PaneView.Closed || view == PaneView.Unavailable
+    LaunchedEffect(message) {
+        if (message) ViewCompat.getWindowInsetsController(rootView)?.hide(WindowInsetsCompat.Type.ime())
+    }
 
     Column(
         Modifier
@@ -124,11 +140,14 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
             .imePadding(),
     ) {
         TopBar(
-            title = tab?.title ?: header.sessionName,
+            title = tab?.title ?: header.sessionName.ifEmpty { vm.live?.host?.name.orEmpty() },
             subtitle = header.subtitle,
             glyph = { tab?.let { ProgramGlyph(it.program, it.programName, it.icon, size = 30.dp) } },
             vm = vm,
             currentWindowId = target?.windowId,
+            // The tab menu and the actions need the tab's layout.
+            enabled = tab != null,
+            working = working,
             onBack = onBack,
             onActions = { actions = true },
         )
@@ -148,12 +167,27 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
                     onFontSizeChanged = { size -> graph.updateSettings { setFontSize(size.value) } },
                 )
             }
+            if (view == PaneView.Live) {
+                GhosttyJumpToBottomButton(
+                    terminalState,
+                    contentDescription = stringResource(R.string.terminal_jump_to_bottom),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                    containerColor = c.card,
+                    contentColor = c.text,
+                )
+            }
             PaneOverlay(
                 // The pane can be ready before its font has loaded.
                 view = if (font == null && (view == PaneView.Live || view == PaneView.Reconnecting)) PaneView.Loading(false, 0) else view,
                 hostName = vm.live?.host?.name.orEmpty(),
-                hasScreen = session != null && font != null,
-                onRetry = vm::retry,
+                hasScreen = hasScreen,
+                onAction = { action ->
+                    when (action) {
+                        PaneAction.Retry -> vm.retry()
+                        PaneAction.SignIn -> signIn()
+                        PaneAction.AllowLocalNetwork -> system.askLocalNetwork()
+                    }
+                },
                 onUseHere = vm::useHere,
                 onBack = onBack,
             )
@@ -162,6 +196,7 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
         if (imeVisible) {
             KeyBar(
                 terminal = terminalState,
+                enabled = typing,
                 onHideKeyboard = { ViewCompat.getWindowInsetsController(rootView)?.hide(WindowInsetsCompat.Type.ime()) },
             )
         } else {
@@ -177,6 +212,7 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
                 }
                 Dock(
                     terminal = terminalState,
+                    enabled = typing,
                     onKeyboard = terminalState::showKeyboard,
                     onMore = { moreKeys = true },
                 )
@@ -191,7 +227,7 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
             windowId = target!!.windowId,
             blockId = target!!.blockId,
             tabTitle = tab.title,
-            paneTitle = panes.firstOrNull { it.id == target!!.blockId }?.label ?: tab.title,
+            paneTitle = panes.firstOrNull { it.id == target!!.blockId }?.title ?: tab.title,
             sessionName = header.sessionName,
             onDismiss = { actions = false },
             onLeave = onBack,
@@ -211,6 +247,8 @@ private fun TopBar(
     glyph: @Composable () -> Unit,
     vm: TerminalViewModel,
     currentWindowId: String?,
+    enabled: Boolean,
+    working: Boolean,
     onBack: () -> Unit,
     onActions: () -> Unit,
 ) {
@@ -230,7 +268,7 @@ private fun TopBar(
             Row(
                 Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable(role = Role.Button, onClickLabel = stringResource(R.string.terminal_switch_tab)) { tabs = true }
+                    .clickable(enabled = enabled, role = Role.Button, onClickLabel = stringResource(R.string.terminal_switch_tab)) { tabs = true }
                     .padding(horizontal = 6.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -247,7 +285,7 @@ private fun TopBar(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        RaxIcon(R.drawable.ic_expand_more, null, tint = c.textSecondary, size = 16.dp)
+                        if (enabled) RaxIcon(R.drawable.ic_expand_more, null, tint = c.textSecondary, size = 16.dp)
                     }
                 }
             }
@@ -260,7 +298,11 @@ private fun TopBar(
                         text = {
                             Text(
                                 row.title,
-                                color = if (w.id == currentWindowId) c.link else c.text,
+                                color = when {
+                                    w.id == currentWindowId -> c.link
+                                    row.waiting -> c.warning
+                                    else -> c.text
+                                },
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -275,13 +317,18 @@ private fun TopBar(
                 }
             }
         }
-        IconAction(R.drawable.ic_more_horiz, stringResource(R.string.terminal_actions), onActions)
+        // While a split or a new tab waits for Rex, a spinner takes the place of the actions.
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (working) CircularProgressIndicator(Modifier.size(20.dp), color = c.textSecondary, strokeWidth = 2.dp)
+            else IconAction(R.drawable.ic_more_horiz, stringResource(R.string.terminal_actions), onActions, enabled = enabled)
+        }
     }
 }
 
 @Composable
 private fun PaneSwitcher(panes: List<PaneChip>, selected: String?, onPick: (String) -> Unit) {
     val c = Rax.colors
+    val waiting = stringResource(R.string.waiting_generic)
     Row(
         Modifier
             .padding(horizontal = 16.dp)
@@ -297,13 +344,14 @@ private fun PaneSwitcher(panes: List<PaneChip>, selected: String?, onPick: (Stri
                 Modifier
                     .clip(RoundedCornerShape(18.dp))
                     .background(if (on) c.control else Color.Transparent)
-                    .clickable(role = Role.Tab) { onPick(pane.id) }
+                    .selectable(selected = on, role = Role.Tab) { onPick(pane.id) }
+                    .semantics { if (pane.waiting) stateDescription = waiting }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    pane.name,
+                    pane.title,
                     style = RaxType.subhead,
                     color = when {
                         pane.waiting -> c.warning
@@ -322,7 +370,7 @@ private fun PaneOverlay(
     view: PaneView,
     hostName: String,
     hasScreen: Boolean,
-    onRetry: () -> Unit,
+    onAction: (PaneAction) -> Unit,
     onUseHere: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -355,7 +403,13 @@ private fun PaneOverlay(
             }
         }
         is PaneView.Failed -> Message(view.message, hasScreen) {
-            if (view.canRetry) PrimaryButton(stringResource(R.string.link_retry), onRetry, Modifier.padding(horizontal = 24.dp))
+            val action = view.action ?: return@Message
+            val label = when (action) {
+                PaneAction.Retry -> R.string.link_retry
+                PaneAction.SignIn -> R.string.link_sign_in
+                PaneAction.AllowLocalNetwork -> R.string.link_allow
+            }
+            PrimaryButton(stringResource(label), { onAction(action) }, Modifier.padding(horizontal = 24.dp))
         }
         PaneView.ElsewhereOwned -> Message(stringResource(R.string.terminal_elsewhere), hasScreen) {
             PrimaryButton(stringResource(R.string.terminal_use_here), onUseHere, Modifier.padding(horizontal = 24.dp))
@@ -370,12 +424,23 @@ private fun PaneOverlay(
     }
 }
 
-/** A message in the middle of the terminal area. It dims the screen behind it, if there is one. */
+/**
+ * A message in the middle of the terminal area. It dims the screen behind it, if there is one, and
+ * takes the touches meant for that screen, which cannot act on the pane now.
+ */
 @Composable
 private fun Message(text: String, hasScreen: Boolean, action: @Composable () -> Unit) {
     val c = Rax.colors
     Box(
-        Modifier.fillMaxSize().then(if (hasScreen) Modifier.background(c.page.copy(alpha = 0.86f)) else Modifier),
+        Modifier.fillMaxSize().then(
+            if (hasScreen) {
+                Modifier
+                    .background(c.page.copy(alpha = 0.86f))
+                    .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }
+            } else {
+                Modifier
+            },
+        ),
         contentAlignment = Alignment.Center,
     ) {
         Column(

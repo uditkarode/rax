@@ -39,6 +39,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import de.uditkaro.rax.R
 import de.uditkaro.rax.theme.Rax
 import de.uditkaro.rax.theme.RaxType
@@ -55,7 +56,7 @@ fun LargeTitleScreen(
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
     backIcon: Int = R.drawable.ic_arrow_back,
-    backLabel: String = "Back",
+    backLabel: String = stringResource(R.string.back),
     actions: @Composable RowScope.() -> Unit = {},
     state: LazyListState = rememberLazyListState(),
     bottomBar: (@Composable () -> Unit)? = null,

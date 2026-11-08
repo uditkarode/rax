@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Base64
 import java.util.concurrent.Semaphore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -248,7 +249,8 @@ class TerminalStream(
  * Typing and sizing for one pane. Writes go in order, one in flight at a time, with whatever was
  * typed meanwhile joined into the next one. Sizes go one at a time too, and only the latest waiting
  * size is sent, so a burst of sizes while the keyboard slides in ends on the last one. The writes of
- * [before], the pane's input until now, go out before the writes of this one.
+ * [before], the pane's input until now, go out before the writes of this one. [onDropped] runs when
+ * typed input could not go out and is gone.
  */
 class PaneInput(
     private val host: RexHost,
@@ -256,6 +258,7 @@ class PaneInput(
     private val blockId: String,
     scope: CoroutineScope,
     before: PaneInput? = null,
+    private val onDropped: () -> Unit = {},
 ) {
     private val queue = Channel<ByteArray>(Channel.UNLIMITED)
     private val sizes = Channel<Size>(Channel.CONFLATED)
@@ -275,13 +278,21 @@ class PaneInput(
                 while (true) batch.write(queue.tryReceive().getOrNull() ?: break)
                 val text = batch.toByteArray().decodeToString()
                 // Keys typed while the connection is down wait a little for it to come back.
-                val st = withTimeoutOrNull(15_000) { ready() } ?: continue
+                val st = withTimeoutOrNull(15_000) { ready() }
+                if (st == null) {
+                    onDropped()
+                    continue
+                }
                 for (part in writeParts(text, (st.link as RexClient.State.Connected).welcome.maxMessageBytes - REQUEST_MARGIN)) {
                     val sent = runCatching {
                         host.client.callBlock(sessionId, blockId, "write", buildJsonObject { put("data", part) })
                     }
-                    // The rest of a paste without the part before it would be garbled.
-                    if (sent.isFailure) break
+                    // The rest of a paste without the part before it would be garbled. A write whose
+                    // answer was lost may have reached the pane, so only a refused one counts as dropped.
+                    val failure = sent.exceptionOrNull() ?: continue
+                    if (failure is CancellationException) throw failure
+                    if (!(failure is RexException && failure.replyLost)) onDropped()
+                    break
                 }
             }
         }

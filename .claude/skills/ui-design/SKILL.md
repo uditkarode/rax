@@ -72,9 +72,21 @@ without a logo gets the terminal icon if it is a shell, else its first letter.
 ## Home
 
 Hosts, then their sessions, then one row per tab: the program running in it, its directory, and
-whether it waits for the user. A host that cannot be reached says why in one line, with Retry,
-Sign in or Allow when the user can act. The "Needs you" section appears only when there are at
-least two sessions; with one session, the waiting tab's own row is enough.
+whether it waits for the user. Before each host's name, a dot shows that it is online, a small
+spinner that it is connecting, and a ring that it cannot be reached. Only a host that cannot be
+reached gets a line of text under its name, which says why, with Retry, Sign in or Allow when the
+user can act. A host keeps its sessions on screen while it connects again after a short drop,
+and hides them once it shows a problem, until it is online again. The "Needs you" section appears
+only when there are at least two sessions; with one session, the waiting tab's own row is enough.
+
+## Feedback
+
+- A tap shows its result at once. An action that waits for Rex or for Tailscale shows that it
+  is under way, such as a spinner in place of the menu that started it, and a second tap does
+  not start it again.
+- An error on a form shows once the user leaves the field or asks to save, and not while they
+  type.
+- A text field takes taps on its whole row, label and padding included.
 
 ## The terminal screen
 
@@ -88,3 +100,5 @@ least two sessions; with one session, the waiting tab's own row is enough.
   Tab sends Shift+Tab.
 - The terminal area is never blank without a reason on screen. It shows loading, the terminal,
   reconnecting over the last screen, or a message with one action. See `pane-pipeline`.
+- While a message covers the last screen, the screen takes no touches and the keys are off, and
+  the keyboard closes. While there is no screen, the keys are off too.

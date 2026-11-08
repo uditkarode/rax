@@ -95,6 +95,12 @@ class TerminalFonts(private val context: Context) {
     /** Just the regular face, for showing a font's name in itself in the picker. */
     fun preview(id: String): Typeface = previews.getOrPut(id) { build(id, previewOnly = true) }
 
+    /** [typeface] if it is already built, so a screen can draw with it from its first frame. */
+    fun cachedTypeface(id: String): Typeface? = full[if (exists(id)) id else bundled.first().id]
+
+    /** [preview] if it is already built. */
+    fun cachedPreview(id: String): Typeface? = previews[id]
+
     private fun build(id: String, previewOnly: Boolean): Typeface = try {
         val fonts = bundled.firstOrNull { it.id == id }?.let { bundledFonts(it, previewOnly) }
             ?: imported.first { it.id == id }.let { importedFonts(it, previewOnly) }
@@ -200,7 +206,8 @@ class TerminalFonts(private val context: Context) {
         }
     }
 
-    suspend fun remove(id: String) = withContext(Dispatchers.IO) {
+    /** Removes an imported font. Returns false if the list of fonts could not be saved, and the font stays. */
+    suspend fun remove(id: String): Boolean = withContext(Dispatchers.IO) {
         lock.withLock {
             val saved = runCatching { save(imported.filterNot { it.id == id }) }
             saved.exceptionOrNull()?.let { Log.w(TAG, "could not remove font $id", it) }
@@ -209,6 +216,7 @@ class TerminalFonts(private val context: Context) {
                 full.remove(id)
                 previews.remove(id)
             }
+            saved.isSuccess
         }
     }
 

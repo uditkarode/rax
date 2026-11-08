@@ -17,6 +17,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -215,5 +216,44 @@ class RexHostTest {
         val hello = second.hello.poll(10, TimeUnit.SECONDS)!!
         assertEquals(first.token, hello["reconnect_token"]?.jsonPrimitive?.contentOrNull)
         waitFor("ready on the second connection") { it.ready }
+    }
+
+    @Test
+    fun theFirstLoadEndsWhenThePanesFactsAreInAndStaysOverAReconnect() {
+        rex.views["session:1"] = FakeRex.view(1, null to listOf("block:a"))
+        val held = CountDownLatch(1)
+        lateinit var read: FakeRex.Request
+        rex.onRequest = { _, r ->
+            if (r.method == "$TERMINAL.program_status" && held.count > 0) {
+                read = r
+                held.countDown()
+                true
+            } else {
+                false
+            }
+        }
+        host.start()
+        val control = rex.nextControl()
+        assertTrue(held.await(10, TimeUnit.SECONDS))
+        val waiting = waitFor("session attached") { it.session("session:1")?.attach == Attach.Done }
+        assertFalse(waiting.loaded)
+
+        control.reply(read, FakeRex.status("" to "working"))
+        waitFor("loaded") { it.loaded }
+
+        control.drop()
+        rex.nextControl()
+        assertTrue(host.state.value.loaded)
+    }
+
+    @Test
+    fun theFirstLoadDoesNotWaitLongForAReadThatHangs() {
+        rex.views["session:1"] = FakeRex.view(1, null to listOf("block:a"))
+        rex.onRequest = { _, r -> r.method == "$TERMINAL.program_status" }
+        host.start()
+        rex.nextControl()
+        val started = System.nanoTime()
+        waitFor("loaded") { it.loaded }
+        assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(5))
     }
 }

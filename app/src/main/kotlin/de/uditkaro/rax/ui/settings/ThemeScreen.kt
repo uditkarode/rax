@@ -24,6 +24,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -127,7 +128,9 @@ private fun ThemeTile(theme: RexTheme, selected: Boolean, mono: FontFamily, onCl
                     .clip(RoundedCornerShape(10.dp))
                     .background(col(t.background))
                     .border(1.dp, theme.colors.stroke, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 9.dp, vertical = 9.dp),
+                    .padding(horizontal = 9.dp, vertical = 9.dp)
+                    // The sample lines are a picture of the theme, so a screen reader reads only its name.
+                    .clearAndSetSemantics {},
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(

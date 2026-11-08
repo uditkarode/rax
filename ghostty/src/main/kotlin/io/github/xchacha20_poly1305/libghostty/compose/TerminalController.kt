@@ -1,5 +1,6 @@
 package io.github.xchacha20_poly1305.libghostty.compose
 
+import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -557,7 +558,13 @@ internal class TerminalController(
             showMessage(R.string.ghostty_copy_failed)
             return
         }
+        confirmCopy()
         clearSelection()
+    }
+
+    /** Android 13 and later show what was copied by themselves. */
+    private fun confirmCopy() {
+        if (Build.VERSION.SDK_INT < 33) showMessage(R.string.ghostty_copied)
     }
 
     // Selection
@@ -718,7 +725,10 @@ internal class TerminalController(
         state.dialogRequest = GhosttyTerminalState.DialogRequest.LinkMenu(
             url,
             openLink = { openLink(url) },
-            copyUrl = { clipboard.setText(url) },
+            copyUrl = {
+                clipboard.setText(url)
+                confirmCopy()
+            },
         )
     }
 

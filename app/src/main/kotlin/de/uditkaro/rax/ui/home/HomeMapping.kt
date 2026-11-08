@@ -191,16 +191,24 @@ fun tabRow(
 
 private fun linkOf(r: Resources, host: Host, state: HostState?): Link = when (val l = state?.link) {
     null, RexClient.State.Stopped, is RexClient.State.Connected -> Link.Connecting
-    is RexClient.State.Connecting -> if (l.attempt < 2) Link.Connecting else Link.Offline(
-        problemText(r, l.lastProblem ?: Problem.Unreachable("no answer"), host.tailnet),
-    )
-    // A single lost connection or failed attempt is common on a phone, and the next attempt follows
-    // half a second later, so the host shows as offline from the second failure on.
-    is RexClient.State.Down -> when {
-        l.attempt == 0 && l.retryInMs != null && (l.problem is Problem.Unreachable || l.problem is Problem.Closed) -> Link.Connecting
-        else -> Link.Offline(problemText(r, l.problem, host.tailnet))
-    }
+    // The first attempt, or one the user or the app just asked for, shows as connecting. Later
+    // attempts keep what the attempt before showed.
+    is RexClient.State.Connecting -> l.lastProblem?.takeIf { l.attempt > 0 && shows(it, l.failingMs) }
+        ?.let { Link.Offline(problemText(r, it, host.tailnet)) }
+        ?: Link.Connecting
+    is RexClient.State.Down ->
+        if (l.retryInMs == null || shows(l.problem, l.failingMs)) Link.Offline(problemText(r, l.problem, host.tailnet))
+        else Link.Connecting
 }
+
+/**
+ * On a phone, a dropped connection or a failed attempt often passes within a few seconds, and the
+ * next attempts follow soon, so such a problem shows only once it lasts [SHOW_PROBLEM_MS].
+ */
+private fun shows(problem: Problem, failingMs: Long): Boolean =
+    failingMs >= SHOW_PROBLEM_MS || (problem !is Problem.Unreachable && problem !is Problem.Closed)
+
+private const val SHOW_PROBLEM_MS = 3_000L
 
 /** Whether Rax can talk to [host] now, and if not, why. */
 fun hostLink(r: Resources, host: Host, state: HostState?, access: Access): Link {
@@ -210,10 +218,12 @@ fun hostLink(r: Resources, host: Host, state: HostState?, access: Access): Link 
         is RexEndpoint.Companion.Parsed.Invalid -> return Link.Offline(addressProblem(r, parsed.reason), retryable = false)
     }
     return when {
-        host.tailnet -> when (access.tailnet) {
+        host.tailnet -> when (val tailnet = access.tailnet) {
             is TailnetStatus.NeedsLogin -> Link.Blocked(Need.TailscaleSignIn)
             TailnetStatus.NeedsApproval -> Link.Offline(r.getString(R.string.problem_tailnet_approval), retryable = false)
-            is TailnetStatus.Error -> Link.Offline(r.getString(R.string.problem_tailnet_failed))
+            is TailnetStatus.Error ->
+                if (tailnet.loggingRequired) Link.Offline(r.getString(R.string.problem_tailnet_logging), retryable = false)
+                else Link.Offline(r.getString(R.string.problem_tailnet_failed))
             TailnetStatus.Stopped, TailnetStatus.Starting -> Link.Connecting
             is TailnetStatus.Running -> linkOf(r, host, state)
         }
@@ -233,11 +243,22 @@ fun addressProblem(r: Resources, reason: RexEndpoint.Companion.Reason): String =
     },
 )
 
-fun buildHome(r: Resources, hosts: List<Host>, states: Map<String, HostState>, access: Access): HomeState {
+/**
+ * Home for [hosts]. [before] is the Home built last, whose hosts that showed a problem keep their
+ * sessions hidden until they are online again.
+ */
+fun buildHome(r: Resources, hosts: List<Host>, states: Map<String, HostState>, access: Access, before: HomeState? = null): HomeState {
+    val offline = HashSet<String>()
     val cards = hosts.map { host ->
         val state = states[host.id]
-        val link = hostLink(r, host, state, access)
-        val sessions = state?.sessions.orEmpty().map { s ->
+        val loaded = state?.loaded == true
+        // Home waits for the first load, so rows do not change one by one as their facts arrive.
+        val link = hostLink(r, host, state, access).let { if (it is Link.Online && !loaded) Link.Connecting else it }
+        val wasOffline = before != null && host.id in before.offline
+        if (link is Link.Offline || link is Link.Blocked || (link == Link.Connecting && wasOffline)) offline += host.id
+        // While a host connects again after a short drop, Home keeps what it showed before.
+        val shown = link is Link.Online || (link == Link.Connecting && loaded && !wasOffline)
+        val sessions = if (!shown) emptyList() else state?.sessions.orEmpty().map { s ->
             val name = s.info.label
             SessionGroup(
                 id = s.info.id,
@@ -247,10 +268,8 @@ fun buildHome(r: Resources, hosts: List<Host>, states: Map<String, HostState>, a
         }
         HostCard(host, link, sessions)
     }
-    // With a single session on screen, its waiting tabs already stand out in its own list. Home
-    // shows the sessions of online hosts only.
-    val online = cards.filter { it.link is Link.Online }
-    val waiting = if (online.sumOf { it.sessions.size } < 2) emptyList()
-    else online.flatMap { c -> c.sessions.flatMap { it.tabs } }.filter { it.waiting }.sortedByDescending { it.waitingSince ?: Long.MIN_VALUE }
-    return HomeState(cards, waiting)
+    // With a single session on screen, its waiting tabs already stand out in its own list.
+    val waiting = if (cards.sumOf { it.sessions.size } < 2) emptyList()
+    else cards.flatMap { c -> c.sessions.flatMap { it.tabs } }.filter { it.waiting }.sortedByDescending { it.waitingSince ?: Long.MIN_VALUE }
+    return HomeState(cards, waiting, offline)
 }

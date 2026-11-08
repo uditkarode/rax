@@ -9,6 +9,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +42,7 @@ fun ProgramGlyph(
             kind == ProgramKind.Shell -> RaxIcon(R.drawable.ic_terminal, null, tint = tint, size = size * 0.55f)
             else -> Text(
                 name.trim().firstOrNull()?.uppercase() ?: "?",
+                Modifier.clearAndSetSemantics {},
                 style = TextStyle(
                     fontFamily = TextFamily,
                     fontWeight = FontWeight.SemiBold,

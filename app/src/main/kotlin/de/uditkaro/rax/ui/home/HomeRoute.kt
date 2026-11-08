@@ -9,8 +9,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import de.uditkaro.rax.AppGraph
+import de.uditkaro.rax.data.Host
+import de.uditkaro.rax.rex.HostState
 import de.uditkaro.rax.ui.Screen
 import de.uditkaro.rax.ui.SystemActions
 import de.uditkaro.rax.ui.showActionFailed
@@ -18,10 +23,14 @@ import de.uditkaro.rax.ui.tailnet.rememberTailnetSignIn
 import de.uditkaro.rax.ui.terminal.rememberTerminalFontFamily
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.launch
 
 @Composable
@@ -30,8 +39,8 @@ fun HomeRoute(graph: AppGraph, system: SystemActions, open: (Screen) -> Unit) {
     val resources = context.resources
     val settings by graph.settings.collectAsStateWithLifecycle()
     val signIn = rememberTailnetSignIn(graph)
-    val homes = remember(graph, resources) { homeStates(graph, resources) }
-    val built by homes.collectAsStateWithLifecycle(initialValue = remember(homes) { homeNow(graph, resources) })
+    val model = viewModel { HomeViewModel(graph, resources) }
+    val built by model.home.collectAsStateWithLifecycle()
     val mono = rememberTerminalFontFamily(graph, settings?.fontId ?: return)
     val home = built ?: return
 
@@ -74,27 +83,40 @@ fun HomeRoute(graph: AppGraph, system: SystemActions, open: (Screen) -> Unit) {
                 }
             },
             settings = { currentOpen(Screen.Settings) },
+            tailscale = { currentOpen(Screen.Tailscale) },
         )
     }
 
-    HomeScreen(state = home, mono = mono, actions = actions)
+    HomeScreen(state = home, mono = mono, actions = actions, creating = creating)
 }
 
-/** Home as the hosts and their connections change, built off the main thread. Null until the hosts are read. */
-private fun homeStates(graph: AppGraph, r: Resources): Flow<HomeState?> =
-    combine(
+/**
+ * Home as the hosts and their connections change, built off the main thread. Null until the hosts
+ * are read. It lives as long as Home is in the back stack, because each Home is built from the one
+ * before it.
+ */
+private class HomeViewModel(graph: AppGraph, r: Resources) : ViewModel() {
+    private val initial = homeNow(graph, r)
+
+    val home: StateFlow<HomeState?> = combine(
         graph.connections.hosts,
         graph.connections.states,
         graph.tailnet.status,
         graph.localNetwork.granted,
         graph.localNetwork.names,
-    ) { hosts, states, tailnet, local, names ->
-        hosts?.let { buildHome(r, it, states, Access(tailnet, local, names)) }
-    }.flowOn(Dispatchers.Default).conflate()
+    ) { hosts, states, tailnet, local, names -> Inputs(hosts, states, Access(tailnet, local, names)) }
+        .scan(initial) { before, i -> i.hosts?.let { buildHome(r, it, i.states, i.access, before) } }
+        .drop(1)
+        .flowOn(Dispatchers.Default)
+        .conflate()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, initial)
 
-/** Home as it is now, for the first frame. */
-private fun homeNow(graph: AppGraph, r: Resources): HomeState? {
-    val hosts = graph.connections.hosts.value ?: return null
-    val access = Access(graph.tailnet.status.value, graph.localNetwork.granted.value, graph.localNetwork.names.value)
-    return buildHome(r, hosts, graph.connections.states.value, access)
+    private class Inputs(val hosts: List<Host>?, val states: Map<String, HostState>, val access: Access)
+
+    /** Home as it is now, for the first frame. */
+    private fun homeNow(graph: AppGraph, r: Resources): HomeState? {
+        val hosts = graph.connections.hosts.value ?: return null
+        val access = Access(graph.tailnet.status.value, graph.localNetwork.granted.value, graph.localNetwork.names.value)
+        return buildHome(r, hosts, graph.connections.states.value, access)
+    }
 }

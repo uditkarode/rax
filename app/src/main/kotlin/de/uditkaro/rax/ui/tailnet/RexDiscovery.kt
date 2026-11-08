@@ -1,11 +1,23 @@
 package de.uditkaro.rax.ui.tailnet
 
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import de.uditkaro.rax.AppGraph
 import de.uditkaro.rax.tailnet.TailnetPeer
+import de.uditkaro.rax.tailnet.TailnetStatus
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -23,6 +35,45 @@ data class RexServer(
     /** Rex answered, but it does not let in the Tailscale account that Rax is signed in with. */
     val refused: Boolean = false,
 )
+
+/** The computers on the tailnet that can run Rex: online, and not a phone or a TV. */
+fun rexCandidates(peers: List<TailnetPeer>): List<TailnetPeer> =
+    peers.filter { it.online && it.os?.lowercase() !in phoneSystems }
+
+private val phoneSystems = setOf("ios", "android", "tvos")
+
+/**
+ * Which computers on the tailnet answer as Rex, by MagicDNS name, with null for those that do not.
+ * A computer is asked once, and again when it comes back online. The answers stay while the
+ * Tailscale screen is in the back stack, so coming back to it from a host asks no one again.
+ */
+class RexDiscoveryModel(graph: AppGraph) : ViewModel() {
+    private val probe = rexProbeClient(graph.tailnetHttp)
+    private val _answers = MutableStateFlow<Map<String, RexServer?>>(emptyMap())
+    val answers: StateFlow<Map<String, RexServer?>> = _answers.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            combine(graph.tailnet.status, graph.tailnet.peers) { status, peers ->
+                if (status is TailnetStatus.Running) rexCandidates(peers) else null
+            }
+                .distinctUntilChanged { a, b -> a?.map { it.dnsName }?.sorted() == b?.map { it.dnsName }?.sorted() }
+                .collectLatest { online ->
+                    if (online == null) return@collectLatest
+                    val names = online.map { it.dnsName }.toSet()
+                    _answers.update { it.filterKeys { name -> name in names } }
+                    coroutineScope {
+                        online.filter { it.dnsName !in _answers.value }.forEach { peer ->
+                            launch {
+                                val server = findRexServer(probe, peer)
+                                _answers.update { it + (peer.dnsName to server) }
+                            }
+                        }
+                    }
+                }
+        }
+    }
+}
 
 /** The client for [findRexServer]: [tailnetHttp] with a short time limit. */
 fun rexProbeClient(tailnetHttp: OkHttpClient): OkHttpClient =

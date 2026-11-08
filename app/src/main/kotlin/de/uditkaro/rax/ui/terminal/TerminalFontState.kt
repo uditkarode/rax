@@ -1,6 +1,5 @@
 package de.uditkaro.rax.ui.terminal
 
-import android.graphics.Typeface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -13,7 +12,7 @@ import kotlinx.coroutines.withContext
 /** The terminal font's regular face as a Compose family, loaded off the main thread. */
 @Composable
 fun rememberTerminalFontFamily(graph: AppGraph, fontId: String): FontFamily {
-    val typeface by produceState<Typeface?>(null, fontId) {
+    val typeface by produceState(graph.fonts.cachedPreview(fontId), fontId) {
         value = withContext(Dispatchers.IO) { graph.fonts.preview(fontId) }
     }
     return remember(typeface) { typeface?.let { FontFamily(it) } ?: FontFamily.Monospace }
@@ -22,7 +21,7 @@ fun rememberTerminalFontFamily(graph: AppGraph, fontId: String): FontFamily {
 /** The terminal font's full family, with its fallback fonts, or null while it loads. */
 @Composable
 fun rememberTerminalFont(graph: AppGraph, fontId: String): FontFamily? {
-    val typeface by produceState<Typeface?>(null, fontId) {
+    val typeface by produceState(graph.fonts.cachedTypeface(fontId), fontId) {
         value = withContext(Dispatchers.IO) { graph.fonts.typeface(fontId) }
     }
     return remember(typeface) { typeface?.let { FontFamily(it) } }

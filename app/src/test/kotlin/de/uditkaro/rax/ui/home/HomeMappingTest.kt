@@ -10,6 +10,7 @@ import de.uditkaro.rax.rex.BlockFacts
 import de.uditkaro.rax.rex.BlockView
 import de.uditkaro.rax.rex.HostState
 import de.uditkaro.rax.rex.LayerView
+import de.uditkaro.rax.rex.Problem
 import de.uditkaro.rax.rex.ProgramRecord
 import de.uditkaro.rax.rex.RexClient
 import de.uditkaro.rax.rex.SessionInfo
@@ -32,6 +33,7 @@ class HomeMappingTest {
     private val online = HostState(
         link = RexClient.State.Connected(Welcome("c", 1, 1, 1 shl 20, resumed = false)),
         ready = true,
+        loaded = true,
     )
     private val access = Access(TailnetStatus.Stopped, localNetwork = true)
 
@@ -64,7 +66,7 @@ class HomeMappingTest {
             "a" to online.copy(sessions = listOf(session("a1", "p1" to waiting)), blocks = mapOf("p1" to waiting)),
             // Offline, but it still remembers its sessions.
             "b" to HostState(
-                link = RexClient.State.Down(de.uditkaro.rax.rex.Problem.Unreachable("x"), retryInMs = 1000, attempt = 3),
+                link = RexClient.State.Down(de.uditkaro.rax.rex.Problem.Unreachable("x"), retryInMs = 1000, attempt = 3, failingMs = 10_000),
                 sessions = listOf(session("b1"), session("b2")),
             ),
         )
@@ -114,5 +116,57 @@ class HomeMappingTest {
         assertEquals(1_793_986_924_685L, row?.waitingSince)
         val noDate = tabRow(r, "h", "s", "s", WindowView(id = "w", layers = listOf(LayerView(blocks = listOf(BlockView(id = "p"))))), 0, mapOf("p" to waitingFacts("s", "soon")))
         assertNull(noDate?.waitingSince)
+    }
+
+    private val lan = Host(id = "a", name = "A", address = "192.168.1.20")
+
+    private fun linkWith(state: RexClient.State) = hostLink(r, lan, HostState(link = state), access)
+
+    @Test
+    fun aDropOrAQuickFailureShowsOnlyOnceItLasts() {
+        val unreachable = Problem.Unreachable("refused")
+        assertEquals(Link.Connecting, linkWith(RexClient.State.Down(Problem.Closed(1006, "gone"), 500, attempt = 0, failingMs = 0)))
+        assertEquals(Link.Connecting, linkWith(RexClient.State.Down(unreachable, 1000, attempt = 2, failingMs = 1_500)))
+        assertEquals(Link.Connecting, linkWith(RexClient.State.Connecting(attempt = 3, lastProblem = unreachable, failingMs = 1_500)))
+        assertEquals(Link.Offline("#${R.string.problem_unreachable}"), linkWith(RexClient.State.Down(unreachable, 2000, attempt = 3, failingMs = 3_500)))
+        // The attempts after that keep the problem on screen.
+        assertEquals(Link.Offline("#${R.string.problem_unreachable}"), linkWith(RexClient.State.Connecting(attempt = 4, lastProblem = unreachable, failingMs = 3_500)))
+    }
+
+    @Test
+    fun aProblemThatIsNotTheNetworkShowsAtOnceAndBetweenAttempts() {
+        val tls = Problem.Tls("bad certificate")
+        assertEquals(Link.Offline("#${R.string.problem_tls}"), linkWith(RexClient.State.Down(tls, 500, attempt = 0, failingMs = 100)))
+        assertEquals(Link.Offline("#${R.string.problem_tls}"), linkWith(RexClient.State.Connecting(attempt = 1, lastProblem = tls, failingMs = 100)))
+    }
+
+    @Test
+    fun anAttemptTheUserAskedForShowsAsConnecting() {
+        val unreachable = Problem.Unreachable("refused")
+        assertEquals(Link.Connecting, linkWith(RexClient.State.Connecting(attempt = 0, lastProblem = unreachable, failingMs = 60_000)))
+        assertEquals(Link.Connecting, linkWith(RexClient.State.Connecting(attempt = 0, lastProblem = Problem.Tls("x"), failingMs = 60_000)))
+    }
+
+    @Test
+    fun aHostThatConnectsAgainKeepsItsSessionsAndAFirstLoadShowsNone() {
+        val again = HostState(link = RexClient.State.Down(Problem.Closed(1006, "gone"), 500, attempt = 0), sessions = listOf(session("s1")), loaded = true)
+        assertEquals(listOf("s1"), buildHome(r, listOf(lan), mapOf("a" to again), access).hosts.single().sessions.map { it.id })
+        val first = online.copy(sessions = listOf(session("s1")), loaded = false)
+        val card = buildHome(r, listOf(lan), mapOf("a" to first), access).hosts.single()
+        assertEquals(Link.Connecting, card.link)
+        assertEquals(emptyList<SessionGroup>(), card.sessions)
+    }
+
+    @Test
+    fun aHostThatShowedAProblemShowsItsSessionsOnlyOnceOnlineAgain() {
+        val sessions = listOf(session("s1"))
+        val down = HostState(link = RexClient.State.Down(Problem.Unreachable("x"), 1000, attempt = 3, failingMs = 5_000), sessions = sessions, loaded = true)
+        val offline = buildHome(r, listOf(lan), mapOf("a" to down), access)
+        // The user asks to try again: the host connects, with its old sessions still in memory.
+        val retrying = down.copy(link = RexClient.State.Connecting(attempt = 0))
+        assertEquals(emptyList<SessionGroup>(), buildHome(r, listOf(lan), mapOf("a" to retrying), access, before = offline).hosts.single().sessions)
+        val back = buildHome(r, listOf(lan), mapOf("a" to online.copy(sessions = sessions)), access, before = offline)
+        assertEquals(listOf("s1"), back.hosts.single().sessions.map { it.id })
+        assertEquals(emptySet<String>(), back.offline)
     }
 }

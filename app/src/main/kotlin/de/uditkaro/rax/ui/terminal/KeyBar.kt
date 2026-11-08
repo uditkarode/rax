@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -37,6 +35,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -58,7 +57,7 @@ import io.github.xchacha20_poly1305.libghostty.compose.rememberGhosttyExtraKeysS
  * off when it goes.
  */
 @Composable
-fun KeyBar(terminal: GhosttyTerminalState, onHideKeyboard: () -> Unit, modifier: Modifier = Modifier) {
+fun KeyBar(terminal: GhosttyTerminalState, enabled: Boolean, onHideKeyboard: () -> Unit, modifier: Modifier = Modifier) {
     val c = Rax.colors
     val extraKeys = rememberGhosttyExtraKeysState()
     DisposableEffect(terminal, extraKeys) {
@@ -71,18 +70,22 @@ fun KeyBar(terminal: GhosttyTerminalState, onHideKeyboard: () -> Unit, modifier:
         modifier.fillMaxWidth().background(c.sheet).padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Key("esc", onTap = { terminal.press(TermKey.Esc) })
-            Key("ctrl", state = ctrl, onTap = { extraKeys.toggleCtrl() })
-            Key("alt", state = alt, onTap = { extraKeys.toggleAlt() })
-            Key("tab", onTap = { terminal.press(TermKey.Tab) }, onHold = { terminal.press(TermKey.ShiftTab) })
-            Key(icon = R.drawable.ic_keyboard_arrow_left, label = stringResource(R.string.key_left), repeat = true, onTap = { terminal.press(TermKey.Left) })
-            Key(icon = R.drawable.ic_keyboard_arrow_up, label = stringResource(R.string.key_up), repeat = true, onTap = { terminal.press(TermKey.Up) })
-            Key(icon = R.drawable.ic_keyboard_arrow_down, label = stringResource(R.string.key_down), repeat = true, onTap = { terminal.press(TermKey.Down) })
-            Key(icon = R.drawable.ic_keyboard_arrow_right, label = stringResource(R.string.key_right), repeat = true, onTap = { terminal.press(TermKey.Right) })
+        // The keys share the width, so all of them fit on a narrow phone.
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            val key = Modifier.weight(1f)
+            Key(TermKey.Esc.cap, key, label = stringResource(R.string.key_esc), enabled = enabled, padding = 2.dp, onTap = { terminal.press(TermKey.Esc) })
+            Key("ctrl", key, label = stringResource(R.string.key_ctrl), state = ctrl, enabled = enabled, padding = 2.dp, onTap = { extraKeys.toggleCtrl() })
+            Key("alt", key, label = stringResource(R.string.key_alt), state = alt, enabled = enabled, padding = 2.dp, onTap = { extraKeys.toggleAlt() })
+            Key(
+                TermKey.Tab.cap, key, label = stringResource(R.string.key_tab), enabled = enabled, padding = 2.dp,
+                onHold = { terminal.press(TermKey.ShiftTab) }, onTap = { terminal.press(TermKey.Tab) },
+            )
+            for (arrow in listOf(TermKey.Left, TermKey.Up, TermKey.Down, TermKey.Right)) {
+                Key(
+                    modifier = key, icon = arrow.icon, label = stringResource(arrow.description), repeat = true, enabled = enabled, padding = 2.dp,
+                    onTap = { terminal.press(arrow) },
+                )
+            }
         }
         Spacer(Modifier.width(6.dp))
         Key(icon = R.drawable.ic_keyboard_hide, label = stringResource(R.string.key_hide_keyboard), onTap = onHideKeyboard, plain = true)
@@ -103,7 +106,9 @@ fun Key(
     repeat: Boolean = false,
     plain: Boolean = false,
     accent: Boolean = false,
+    enabled: Boolean = true,
     height: Dp = 40.dp,
+    padding: Dp = 12.dp,
     onHold: (() -> Unit)? = null,
     onTap: () -> Unit,
 ) {
@@ -112,19 +117,27 @@ fun Key(
     var pressed by remember { mutableStateOf(false) }
     val tap by rememberUpdatedState(onTap)
     val hold by rememberUpdatedState(onHold)
+    val filled = accent || state != StickyState.INACTIVE
     val background = when {
-        accent -> c.accent
-        state == StickyState.LOCKED -> c.accent
+        accent || state == StickyState.LOCKED -> c.accent
         state == StickyState.ARMED -> c.accentContainer
         pressed -> c.control
         plain -> Color.Transparent
         else -> c.card
+    }.let {
+        when {
+            filled && !enabled -> it.copy(alpha = it.alpha * 0.38f)
+            filled && pressed -> it.copy(alpha = it.alpha * 0.7f)
+            else -> it
+        }
     }
     val content = when {
         accent || state == StickyState.LOCKED -> c.onAccent
         state == StickyState.ARMED -> c.onAccentContainer
         else -> c.text
-    }
+    }.let { if (enabled) it else it.copy(alpha = 0.38f) }
+    val armed = stringResource(R.string.key_armed)
+    val locked = stringResource(R.string.key_locked)
     Box(
         modifier
             .height(height)
@@ -134,10 +147,14 @@ fun Key(
             .semantics {
                 role = Role.Button
                 label?.let { contentDescription = it }
-                if (state != StickyState.INACTIVE) stateDescription = state.name.lowercase()
-                onClick { tap(); true }
+                when (state) {
+                    StickyState.ARMED -> stateDescription = armed
+                    StickyState.LOCKED -> stateDescription = locked
+                    StickyState.INACTIVE -> Unit
+                }
+                if (enabled) onClick { tap(); true } else disabled()
             }
-            .pointerInput(repeat) {
+            .then(if (enabled) Modifier.pointerInput(repeat) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
                     pressed = true
@@ -160,14 +177,14 @@ fun Key(
                     }
                     pressed = false
                 }
-            }
-            .padding(horizontal = 12.dp),
+            } else Modifier)
+            .padding(horizontal = padding),
         contentAlignment = Alignment.Center,
     ) {
         if (icon != null) {
             RaxIcon(icon, null, tint = content, size = 22.dp)
         } else if (text != null) {
-            Text(text, style = RaxType.subhead.copy(fontWeight = FontWeight.Medium), color = content)
+            Text(text, style = RaxType.subhead.copy(fontWeight = FontWeight.Medium), color = content, maxLines = 1, softWrap = false)
         }
     }
 }
@@ -184,6 +201,7 @@ private const val REPEAT_MS = 60L
 @Composable
 fun Dock(
     terminal: GhosttyTerminalState,
+    enabled: Boolean,
     onKeyboard: () -> Unit,
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
@@ -197,18 +215,19 @@ fun Dock(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Key(icon = R.drawable.ic_keyboard, label = stringResource(R.string.key_show_keyboard), plain = true, height = 48.dp, onTap = onKeyboard)
-        Key("esc", plain = true, height = 48.dp, onTap = { terminal.press(TermKey.Esc) })
-        Key(icon = R.drawable.ic_keyboard_arrow_up, label = stringResource(R.string.key_up), plain = true, repeat = true, height = 48.dp, onTap = { terminal.press(TermKey.Up) })
-        Key(icon = R.drawable.ic_keyboard_arrow_down, label = stringResource(R.string.key_down), plain = true, repeat = true, height = 48.dp, onTap = { terminal.press(TermKey.Down) })
+        Key(icon = R.drawable.ic_keyboard, label = stringResource(R.string.key_show_keyboard), plain = true, enabled = enabled, height = 48.dp, onTap = onKeyboard)
+        Key(TermKey.Esc.cap, label = stringResource(R.string.key_esc), plain = true, enabled = enabled, height = 48.dp, onTap = { terminal.press(TermKey.Esc) })
+        Key(icon = R.drawable.ic_keyboard_arrow_up, label = stringResource(R.string.key_up), plain = true, repeat = true, enabled = enabled, height = 48.dp, onTap = { terminal.press(TermKey.Up) })
+        Key(icon = R.drawable.ic_keyboard_arrow_down, label = stringResource(R.string.key_down), plain = true, repeat = true, enabled = enabled, height = 48.dp, onTap = { terminal.press(TermKey.Down) })
         Key(
             icon = R.drawable.ic_keyboard_return,
             label = stringResource(R.string.key_enter),
             accent = true,
+            enabled = enabled,
             height = 48.dp,
             modifier = Modifier.size(48.dp),
             onTap = { terminal.press(TermKey.Enter) },
         )
-        Key(icon = R.drawable.ic_keyboard_command_key, label = stringResource(R.string.key_more), plain = true, height = 48.dp, onTap = onMore)
+        Key(icon = R.drawable.ic_keyboard_command_key, label = stringResource(R.string.key_more), plain = true, enabled = enabled, height = 48.dp, onTap = onMore)
     }
 }

@@ -1,5 +1,6 @@
 package de.uditkaro.rax.ui.hosts
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -64,6 +66,9 @@ fun HostEditorScreen(
     var tailnet by rememberSaveable { mutableStateOf(host?.tailnet ?: false) }
     var tailnetTouched by rememberSaveable { mutableStateOf(host != null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    // A problem with the address shows once the user leaves the field or asks to save, not while
+    // they type it.
+    var checkAddress by rememberSaveable { mutableStateOf(host != null) }
     val newId = rememberSaveable { UUID.randomUUID().toString() }
     // The screen still takes taps while it slides away, and a second save or close must not run.
     var done by remember { mutableStateOf(false) }
@@ -80,6 +85,7 @@ fun HostEditorScreen(
     val check = describe(address.trim(), tailnet)
     val canSave = address.isNotBlank() && check is HostCheck.Ok
     val save = {
+        checkAddress = true
         if (canSave) {
             val trimmed = address.trim()
             val finalName = name.trim().ifEmpty { defaultName(trimmed) }
@@ -127,18 +133,15 @@ fun HostEditorScreen(
                                 imeAction = ImeAction.Done,
                             ),
                             onDone = save,
-                            modifier = Modifier.focusRequester(focus),
+                            modifier = Modifier
+                                .focusRequester(focus)
+                                .onFocusChanged { if (!it.isFocused && address.isNotBlank()) checkAddress = true },
                         )
                     }
                 }
                 when (check) {
                     is HostCheck.Ok -> if (address.isNotBlank()) Footnote(check.summary)
-                    is HostCheck.Invalid -> Text(
-                        check.reason,
-                        Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
-                        style = RaxType.footnote,
-                        color = Rax.colors.danger,
-                    )
+                    is HostCheck.Invalid -> if (checkAddress) Footnote(check.reason)
                 }
             }
         }
@@ -152,7 +155,6 @@ fun HostEditorScreen(
                     })
                 }
             }
-            Footnote(stringResource(R.string.host_tailnet_footnote))
         }
         if (server != null) {
             item(key = "server") {
@@ -214,23 +216,26 @@ private fun Field(
     onDone: () -> Unit = {},
 ) {
     val c = Rax.colors
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Text(label, style = RaxType.footnote, color = c.textSecondary)
-        BasicTextField(
-            value = value,
-            onValueChange = onValue,
-            modifier = modifier.fillMaxWidth().padding(top = 4.dp),
-            textStyle = style.copy(color = c.text),
-            singleLine = true,
-            cursorBrush = SolidColor(c.accent),
-            keyboardOptions = keyboard,
-            keyboardActions = KeyboardActions(onDone = { onDone() }),
-            decorationBox = { inner ->
-                if (value.isEmpty()) Text(placeholder, style = style, color = c.textTertiary, maxLines = 1)
-                inner()
-            },
-        )
-    }
+    // The label and the padding are part of the field, so a tap anywhere on the row focuses it.
+    BasicTextField(
+        value = value,
+        onValueChange = onValue,
+        modifier = modifier.fillMaxWidth(),
+        textStyle = style.copy(color = c.text),
+        singleLine = true,
+        cursorBrush = SolidColor(c.accent),
+        keyboardOptions = keyboard,
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        decorationBox = { inner ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Text(label, style = RaxType.footnote, color = c.textSecondary)
+                Box(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    if (value.isEmpty()) Text(placeholder, style = style, color = c.textTertiary, maxLines = 1)
+                    inner()
+                }
+            }
+        },
+    )
 }
 
 fun looksLikeTailnet(address: String): Boolean {

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,8 +25,10 @@ import androidx.compose.ui.unit.dp
 @Composable
 public fun GhosttyJumpToBottomButton(
     state: GhosttyTerminalState,
+    contentDescription: String?,
     modifier: Modifier = Modifier,
     containerColor: Color = FloatingActionButtonDefaults.containerColor,
+    contentColor: Color = contentColorFor(containerColor),
 ) {
     AnimatedVisibility(
         visible = !state.scrollbar.isAtBottom,
@@ -33,8 +36,8 @@ public fun GhosttyJumpToBottomButton(
         enter = fadeIn() + scaleIn(),
         exit = fadeOut() + scaleOut(),
     ) {
-        SmallFloatingActionButton(onClick = state::scrollToBottom, containerColor = containerColor) {
-            Icon(arrowDownwardIcon, contentDescription = null, modifier = Modifier.size(20.dp))
+        SmallFloatingActionButton(onClick = state::scrollToBottom, containerColor = containerColor, contentColor = contentColor) {
+            Icon(arrowDownwardIcon, contentDescription = contentDescription, modifier = Modifier.size(20.dp))
         }
     }
 }

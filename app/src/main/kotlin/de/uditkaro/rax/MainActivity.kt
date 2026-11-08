@@ -78,7 +78,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
-        splash.setKeepOnScreenCondition { graph.settings.value == null || graph.themes.value == null }
+        // A screen that Android restores, or a notification opens, needs the hosts from its first frame.
+        splash.setKeepOnScreenCondition {
+            graph.settings.value == null || graph.themes.value == null || graph.connections.hosts.value == null
+        }
         enableEdgeToEdge()
         if (savedInstanceState == null) pendingOpen = paneOf(intent)
         asking = savedInstanceState?.getString(STATE_ASKING)
@@ -87,8 +90,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings by graph.settings.collectAsStateWithLifecycle()
             val themes by graph.themes.collectAsStateWithLifecycle()
+            val hosts by graph.connections.hosts.collectAsStateWithLifecycle()
             val s = settings ?: return@setContent
             val catalog = themes ?: return@setContent
+            if (hosts == null) return@setContent
             val theme = activeTheme(s, catalog)
             SystemBars(theme.dark)
             // The splash screen and the window take their colours from the app's night mode.

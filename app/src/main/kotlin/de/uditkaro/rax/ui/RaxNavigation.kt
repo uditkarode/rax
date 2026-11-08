@@ -9,7 +9,11 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,11 +61,19 @@ private const val PUSH_MS = 380
 fun RaxNavigation(graph: AppGraph, system: SystemActions, pendingOpen: Screen.Terminal?, onPendingOpened: () -> Unit) {
     val backStack = rememberNavBackStack(Screen.Home)
     val pop: () -> Unit = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) }
+    // A pane a notification asked for, in the session whose screen is open already.
+    var paneRequest by remember { mutableStateOf<Screen.Terminal?>(null) }
 
     if (pendingOpen != null) {
-        // A notification asked for a pane: show it on top of Home, replacing whatever was open.
-        while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
-        backStack.add(pendingOpen)
+        val top = backStack.lastOrNull() as? Screen.Terminal
+        if (top != null && top.hostId == pendingOpen.hostId && top.sessionId == pendingOpen.sessionId) {
+            // The open screen switches to the pane, and keeps what it shows meanwhile.
+            paneRequest = pendingOpen
+        } else {
+            // Show the pane on top of Home, replacing whatever was open.
+            while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+            backStack.add(pendingOpen)
+        }
         onPendingOpened()
     }
 
@@ -88,7 +100,14 @@ fun RaxNavigation(graph: AppGraph, system: SystemActions, pendingOpen: Screen.Te
             entry<Screen.Terminal> { key ->
                 val app = LocalContext.current.applicationContext as Application
                 val vm = viewModel { TerminalViewModel(app, key.hostId, key.sessionId, key.windowId, key.blockId) }
-                TerminalScreen(graph, vm, onBack = { backStack.close(key) })
+                val request = paneRequest
+                LaunchedEffect(request) {
+                    if (request != null && request.hostId == key.hostId && request.sessionId == key.sessionId) {
+                        vm.showTab(request.windowId, request.blockId)
+                        paneRequest = null
+                    }
+                }
+                TerminalScreen(graph, system, vm, onBack = { backStack.close(key) })
             }
             entry<Screen.HostEditor> { key -> HostEditorRoute(graph, system, key, onClose = { backStack.close(key) }) }
             entry<Screen.Tailscale> { key ->

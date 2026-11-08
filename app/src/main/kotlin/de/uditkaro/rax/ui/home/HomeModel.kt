@@ -12,6 +12,8 @@ data class HomeState(
     val hosts: List<HostCard>,
     /** Programs that wait for the user, across every host, newest first. */
     val waiting: List<TabRow>,
+    /** The hosts that showed a problem and have not been online since. */
+    val offline: Set<String> = emptySet(),
 )
 
 @Immutable

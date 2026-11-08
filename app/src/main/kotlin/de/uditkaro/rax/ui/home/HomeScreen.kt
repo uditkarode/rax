@@ -6,9 +6,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
@@ -23,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -51,10 +56,11 @@ class HomeActions(
     val newSession: (Host) -> Unit,
     val allow: (Need) -> Unit,
     val settings: () -> Unit,
+    val tailscale: () -> Unit,
 )
 
 @Composable
-fun HomeScreen(state: HomeState, mono: FontFamily, actions: HomeActions) {
+fun HomeScreen(state: HomeState, mono: FontFamily, actions: HomeActions, creating: Set<String>) {
     val empty = state.hosts.isEmpty()
     LargeTitleScreen(
         title = stringResource(if (empty) R.string.welcome_title else R.string.home_title),
@@ -63,7 +69,7 @@ fun HomeScreen(state: HomeState, mono: FontFamily, actions: HomeActions) {
         bottomBar = if (empty) ({ PrimaryButton(stringResource(R.string.add_host), actions.addHost) }) else null,
     ) {
         if (empty) {
-            welcome(mono)
+            welcome(mono, actions.tailscale)
             return@LargeTitleScreen
         }
         if (state.waiting.isNotEmpty()) {
@@ -76,17 +82,18 @@ fun HomeScreen(state: HomeState, mono: FontFamily, actions: HomeActions) {
                 }
             }
         }
-        state.hosts.forEach { card -> host(card, actions, multipleHosts = state.hosts.size > 1) }
+        state.hosts.forEach { card -> host(card, actions, creating = card.host.id in creating) }
     }
 }
 
-private fun LazyListScope.host(card: HostCard, actions: HomeActions, multipleHosts: Boolean) {
-    item(key = "host-${card.host.id}") { HostHeader(card, actions) }
-    if (card.link !is Link.Online) return
-    if (card.sessions.isEmpty()) {
+private fun LazyListScope.host(card: HostCard, actions: HomeActions, creating: Boolean) {
+    item(key = "host-${card.host.id}") { HostHeader(card, actions, creating) }
+    if (card.link is Link.Online && card.sessions.isEmpty()) {
         item(key = "host-${card.host.id}-empty") {
             Group(Modifier.padding(top = 8.dp)) {
-                row { ActionRow(stringResource(R.string.session_new), { actions.newSession(card.host) }, icon = R.drawable.ic_add) }
+                row {
+                    ActionRow(stringResource(R.string.session_new), { actions.newSession(card.host) }, icon = R.drawable.ic_add, enabled = !creating)
+                }
             }
         }
     }
@@ -96,103 +103,109 @@ private fun LazyListScope.host(card: HostCard, actions: HomeActions, multipleHos
 }
 
 @Composable
-private fun HostHeader(card: HostCard, actions: HomeActions) {
+private fun HostHeader(card: HostCard, actions: HomeActions, creating: Boolean) {
     val c = Rax.colors
     var menu by remember { mutableStateOf(false) }
-    Row(
-        Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 28.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
+    Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 28.dp, bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LinkMark(card.link)
             Text(
                 card.host.name,
-                Modifier.semantics { heading() },
+                Modifier.weight(1f).semantics { heading() },
                 style = RaxType.title,
                 color = c.text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(
-                Modifier.padding(top = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                when (val link = card.link) {
-                    is Link.Online -> {
-                        StatusDot(online = true)
-                        Text(
-                            stringResource(if (link.viaTailnet) R.string.link_online_tailnet else R.string.link_online),
-                            style = RaxType.footnote,
-                            color = c.textSecondary,
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                if (creating) {
+                    CircularProgressIndicator(Modifier.size(20.dp), color = c.textSecondary, strokeWidth = 2.dp)
+                } else {
+                    IconAction(R.drawable.ic_more_horiz, stringResource(R.string.host_menu, card.host.name), { menu = true }, tint = c.textSecondary)
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (card.link is Link.Online) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.session_new)) },
+                            onClick = { menu = false; actions.newSession(card.host) },
                         )
                     }
-                    Link.Connecting -> {
-                        StatusDot(online = false)
-                        Text(stringResource(R.string.link_connecting), style = RaxType.footnote, color = c.textSecondary)
-                    }
-                    is Link.Offline -> {
-                        StatusDot(online = false)
-                        Text(
-                            link.message,
-                            Modifier.weight(1f, fill = false),
-                            style = RaxType.footnote,
-                            color = c.textSecondary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (link.retryable) {
-                            Text(
-                                stringResource(R.string.link_retry),
-                                Modifier.clickable(role = Role.Button) { actions.connect(card.host) }.padding(vertical = 4.dp),
-                                style = RaxType.footnote,
-                                color = c.link,
-                            )
-                        }
-                    }
-                    is Link.Blocked -> {
-                        StatusDot(online = false)
-                        Text(
-                            stringResource(
-                                when (link.need) {
-                                    Need.TailscaleSignIn -> R.string.link_needs_tailnet
-                                    Need.LocalNetwork -> R.string.link_needs_local_network
-                                },
-                            ),
-                            Modifier.weight(1f, fill = false),
-                            style = RaxType.footnote,
-                            color = c.textSecondary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            stringResource(
-                                when (link.need) {
-                                    Need.TailscaleSignIn -> R.string.link_sign_in
-                                    Need.LocalNetwork -> R.string.link_allow
-                                },
-                            ),
-                            Modifier.clickable(role = Role.Button) { actions.allow(link.need) }.padding(vertical = 4.dp),
-                            style = RaxType.footnote,
-                            color = c.link,
-                        )
-                    }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.host_edit)) },
+                        onClick = { menu = false; actions.editHost(card.host) },
+                    )
                 }
             }
         }
-        Box {
-            IconAction(R.drawable.ic_more_horiz, stringResource(R.string.host_menu, card.host.name), { menu = true }, tint = c.textSecondary)
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                if (card.link is Link.Online) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.session_new)) },
-                        onClick = { menu = false; actions.newSession(card.host) },
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.host_edit)) },
-                    onClick = { menu = false; actions.editHost(card.host) },
+        // Only a host that needs the user's attention says so in words.
+        when (val link = card.link) {
+            is Link.Offline -> ProblemLine(link.message, stringResource(R.string.link_retry).takeIf { link.retryable }) { actions.connect(card.host) }
+            is Link.Blocked -> ProblemLine(
+                stringResource(
+                    when (link.need) {
+                        Need.TailscaleSignIn -> R.string.link_needs_tailnet
+                        Need.LocalNetwork -> R.string.link_needs_local_network
+                    },
+                ),
+                stringResource(
+                    when (link.need) {
+                        Need.TailscaleSignIn -> R.string.link_sign_in
+                        Need.LocalNetwork -> R.string.link_allow
+                    },
+                ),
+            ) { actions.allow(link.need) }
+            Link.Connecting, is Link.Online -> Unit
+        }
+    }
+}
+
+/** Why a host cannot be reached, under its name, with what the user can do about it. */
+@Composable
+private fun ProblemLine(message: String, action: String?, onAction: () -> Unit) {
+    val c = Rax.colors
+    Row(
+        Modifier.padding(start = 18.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            message,
+            Modifier.weight(1f, fill = false),
+            style = RaxType.footnote,
+            color = c.textSecondary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (action != null) {
+            Text(
+                action,
+                Modifier.clickable(role = Role.Button, onClick = onAction).padding(vertical = 4.dp),
+                style = RaxType.footnote,
+                color = c.link,
+            )
+        }
+    }
+}
+
+/** Whether the host is online, connecting or not reachable, before its name. */
+@Composable
+private fun LinkMark(link: Link) {
+    val c = Rax.colors
+    Box(Modifier.size(10.dp), contentAlignment = Alignment.Center) {
+        when (link) {
+            is Link.Online -> StatusDot(
+                online = true,
+                contentDescription = stringResource(if (link.viaTailnet) R.string.link_online_tailnet else R.string.link_online),
+            )
+            Link.Connecting -> {
+                val connecting = stringResource(R.string.link_connecting)
+                CircularProgressIndicator(
+                    Modifier.fillMaxSize().semantics { contentDescription = connecting },
+                    color = c.textSecondary,
+                    strokeWidth = 1.5.dp,
                 )
             }
+            is Link.Offline, is Link.Blocked -> StatusDot(online = false)
         }
     }
 }
@@ -257,7 +270,14 @@ private fun TabRowView(tab: TabRow, onOpen: (TabRow) -> Unit, showSession: Boole
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (showSession) {
-                    Text(tab.sessionName, style = RaxType.footnote, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        tab.sessionName,
+                        Modifier.widthIn(max = 140.dp),
+                        style = RaxType.footnote,
+                        color = c.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
             if (tab.detail != null) {
