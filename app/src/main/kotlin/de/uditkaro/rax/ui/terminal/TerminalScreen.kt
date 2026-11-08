@@ -1,6 +1,8 @@
 package de.uditkaro.rax.ui.terminal
 
 import android.text.format.Formatter
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -98,6 +100,7 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
     val session by vm.session.collectAsStateWithLifecycle()
     val view by vm.view.collectAsStateWithLifecycle()
     val working by vm.working.collectAsStateWithLifecycle()
+    val sending by vm.sending.collectAsStateWithLifecycle()
     val signIn = rememberTailnetSignIn(graph)
     val s = settings ?: return
     val theme = activeTheme(s, themes ?: return)
@@ -106,6 +109,9 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
     val terminalState = rememberGhosttyTerminalState()
     // Pinch zoom stays in the sizes the settings keep.
     terminalState.fontSizeRangeSp = Settings.FONT_SIZES
+    // Images from the keyboard, and files pasted from the clipboard, go to the computer.
+    terminalState.onReceiveContent = { vm.send(listOf(it.uri), it.release) }
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> vm.send(uris) }
     val rootView = LocalView.current
     // Ending the terminal's input session keeps the keyboard from coming back by itself when Rax returns.
     val hideKeyboard: () -> Unit = {
@@ -193,6 +199,8 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
                     contentColor = c.text,
                 )
             }
+            // The side padding keeps the pill clear of the jump to bottom button.
+            SendingPill(sending, vm::stopSending, Modifier.align(Alignment.BottomCenter).padding(horizontal = 72.dp, vertical = 12.dp))
             PaneOverlay(
                 // The pane can be ready before its font has loaded.
                 view = if (font == null && (view == PaneView.Live || view == PaneView.Reconnecting)) PaneView.Loading(false, 0) else view,
@@ -257,6 +265,7 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
             tabTitle = tab.title,
             paneTitle = panes.firstOrNull { it.id == target!!.blockId }?.title ?: tab.title,
             sessionName = header.sessionName,
+            onSendFiles = { pickFiles.launch(arrayOf("*/*")) },
             onDismiss = { actions = false },
             onLeave = onBack,
         )
@@ -352,6 +361,40 @@ private fun TopBar(
         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
             if (working) CircularProgressIndicator(Modifier.size(20.dp), color = c.textSecondary, strokeWidth = 2.dp)
             else IconAction(R.drawable.ic_more_horiz, stringResource(R.string.terminal_actions), onActions, enabled = enabled)
+        }
+    }
+}
+
+/** How far the files on their way to the computer are, with a button that stops them. */
+@Composable
+private fun SendingPill(sending: Sending?, onStop: () -> Unit, modifier: Modifier) {
+    val c = Rax.colors
+    // Keeps the last value while the pill fades out.
+    var last by remember { mutableStateOf(sending) }
+    if (sending != null) last = sending
+    AnimatedVisibility(sending != null, modifier, enter = fadeIn(), exit = fadeOut()) {
+        val shown = last ?: return@AnimatedVisibility
+        Row(
+            Modifier.clip(RoundedCornerShape(22.dp)).background(c.card).padding(start = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            CircularProgressIndicator(
+                progress = { shown.fraction },
+                modifier = Modifier.size(18.dp),
+                color = c.link,
+                trackColor = c.control,
+                strokeWidth = 2.5.dp,
+            )
+            Text(
+                if (shown.count > 1) stringResource(R.string.sending_files, shown.count) else stringResource(R.string.sending_file, shown.name),
+                Modifier.weight(1f, fill = false),
+                style = RaxType.footnote,
+                color = c.text,
+                maxLines = 1,
+                overflow = TextOverflow.MiddleEllipsis,
+            )
+            IconAction(R.drawable.ic_close, stringResource(R.string.sending_stop), onStop, tint = c.textSecondary)
         }
     }
 }

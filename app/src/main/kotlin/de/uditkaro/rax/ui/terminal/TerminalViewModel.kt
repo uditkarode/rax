@@ -1,6 +1,7 @@
 package de.uditkaro.rax.ui.terminal
 
 import android.app.Application
+import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
@@ -17,6 +18,7 @@ import de.uditkaro.rax.rex.RexException
 import de.uditkaro.rax.rex.RexHost
 import de.uditkaro.rax.rex.TerminalStream
 import de.uditkaro.rax.rex.WindowView
+import de.uditkaro.rax.rex.upload
 import de.uditkaro.rax.ui.home.Link
 import de.uditkaro.rax.ui.home.Need
 import de.uditkaro.rax.ui.home.TabRow
@@ -26,10 +28,13 @@ import de.uditkaro.rax.ui.home.shortPath
 import de.uditkaro.rax.ui.home.tabRow
 import de.uditkaro.rax.ui.showActionFailed
 import io.github.xchacha20_poly1305.libghostty.GhosttyTerminalSession
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.job
 import kotlinx.coroutines.delay
@@ -497,6 +502,74 @@ class TerminalViewModel(
     fun showTab(windowId: String, blockId: String?) {
         val block = blockId ?: window(host.value, windowId)?.primaryBlockId ?: return
         show(PaneTarget(windowId, block))
+    }
+
+    private val _sending = MutableStateFlow<Sending?>(null)
+
+    /** Files on their way to the computer, or null. */
+    val sending: StateFlow<Sending?> = _sending.asStateFlow()
+
+    /** The parent of each [send], so Stop ends the one going out and those waiting. */
+    private val sends = SupervisorJob(viewModelScope.coroutineContext.job)
+    private var lastSend: Job? = null
+
+    /**
+     * Sends the files behind [uris] to the computer, and the shown pane gets their paths as a paste. Sends
+     * go one after another. [release] runs once the files have been read or the send failed.
+     */
+    fun send(uris: List<Uri>, release: () -> Unit = {}) {
+        val rex = live?.rex
+        val pane = _target.value?.blockId
+        if (rex == null || pane == null || uris.isEmpty()) {
+            release()
+            return
+        }
+        val app = getApplication<Application>()
+        val before = lastSend
+        lastSend = viewModelScope.launch(sends) {
+            val temps = ArrayList<File>()
+            try {
+                before?.join()
+                val files = try {
+                    withContext(Dispatchers.IO) { uris.map { app.uploadFile(it, temps) } }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "Couldn't read a file to send", e)
+                    sendFailed(null, uris.size)
+                    return@launch
+                }
+                val total = files.sumOf { it.size }
+                val first = files.first().name
+                _sending.value = Sending(first, files.size, 0, total)
+                rex.upload(sessionId, pane, files) { sent -> _sending.value = Sending(first, files.size, sent, total) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't send ${uris.size} file(s)", e)
+                sendFailed(e, uris.size)
+            } finally {
+                _sending.value = null
+                release()
+                withContext(NonCancellable + Dispatchers.IO) { temps.forEach { it.delete() } }
+            }
+        }
+    }
+
+    /** Stops the send going out and those waiting. Rex then types nothing and keeps nothing of them. */
+    fun stopSending() {
+        sends.children.forEach { it.cancel() }
+    }
+
+    private fun sendFailed(e: Exception?, count: Int) {
+        val message = when {
+            e is RexException && e.code == "method_not_found" -> R.string.send_needs_update
+            e is RexException && e.code == "too_large" -> R.string.send_too_large
+            e is RexException && e.replyLost -> R.string.action_failed_offline
+            count > 1 -> R.string.send_failed_many
+            else -> R.string.send_failed
+        }
+        Toast.makeText(getApplication(), message, Toast.LENGTH_SHORT).show()
     }
 
     private fun inputDropped() {

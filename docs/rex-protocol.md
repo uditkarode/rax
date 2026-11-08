@@ -576,6 +576,30 @@ it returned only that screen (173 bytes).
 | 4000 | `block closed` | Block closed (observed after `exit`). Do not reconnect |
 | 1002/1008/1011/1013 | `data handshake rejected` | After a REJECT (observed 1008) |
 
+### 5.10 Sending files
+
+A client sends files to the pane's computer, and the terminal types their paths as a paste once all have
+arrived. Observed with `tools/rex-probe/upload.py`; the rules quoted are from the guide inside the Rex binary.
+
+1. `com.superlogical.terminal.upload_begin` with `args` `{"ref":"upload:<new lower-case UUID>","name","size"}`,
+   plus `"batch":"<client's ID>","index","count"` for files whose paths are typed together. Reply
+   `{"ticket","expires_in_ms"}` (60000). Errors: `bad_request` (bad `ref`, `name` or batch), `too_large`,
+   `conflict` (too many reserved), and `method_not_found` from a Rex without uploads.
+2. Open `/api/data` with subprotocol `rex.data.bytes.v1` and send HELLO with the ticket (5.2). WELCOME is the
+   same 32 bytes as for a terminal stream.
+3. Send the file as binary messages of at most 65536 bytes. A larger message closes the stream with 1009
+   (`read limited at 65537 bytes`).
+4. Send one empty binary message to end the file ("half-close"). A close frame from the client instead stops
+   the upload (`upload batch aborted`), and so does a client close before Rex ends the stream.
+5. Rex ends each stream with 1000 once its file has arrived. The stream of the batch's last file ends with 1000
+   only after the paths were typed. "If every stream of a batch ended with `ok`, the paths were typed. Any other
+   code means nothing was typed and nothing is left on the server." Fewer bytes than `size` and then the empty
+   message gave 4006 (`data stream broke a rule`).
+
+Typed for `photo one.png`, bracketed paste on:
+`ESC[200~/<state dir>/uploads/<pid>/<client>/<uuid>/photo\ one.png ESC[201~` (spaces escaped with a backslash,
+a space after each path).
+
 ## 6. Input
 
 Bytes flow only from server to client on the data connection. Input goes over the control connection.
@@ -686,7 +710,7 @@ Terminal block events, from `block_creator.list`. All were observed except `sele
 | `program_status_removed` | `ids[]`, `reason`: `clear`, `child_exited`, `reset`, `prompt`, `foreground`, `evicted` | |
 | `progress_report` | `state`: `set`, `indeterminate`, `pause`, `error`, `remove`; `progress` 0–100 | OSC 9;4 |
 | `child_exited` | `exit_code`, `error` | Program exit |
-| `clipboard_written` | `text` (if small), `id`, `bytes` → `….clipboard_read` | OSC 52 |
+| `clipboard_written` | `text` (if small), `id`, `bytes` → `….clipboard_read` | OSC 52. The OSC 52 sequence also stays in the pane's data stream (observed) |
 | `title_changed`, `pwd_changed`, `process_changed`, `size_changed` | see 4.4 | |
 | `selection_copied`, `url_clicked` | `text`/`id`/`bytes`; `url` | User actions in a client that renders mouse selection **(server doc)** |
 

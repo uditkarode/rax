@@ -2,6 +2,7 @@ package io.github.xchacha20_poly1305.libghostty.compose
 
 import android.content.Context
 import android.graphics.Matrix
+import android.os.Bundle
 import android.text.InputType
 import android.text.Selection
 import android.view.KeyCharacterMap
@@ -11,6 +12,7 @@ import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.CursorAnchorInfo
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputContentInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusEventModifierNode
@@ -199,6 +201,7 @@ private class TerminalInputNode(
             outAttributes.imeOptions = EditorInfo.IME_ACTION_NONE or
                     EditorInfo.IME_FLAG_NO_FULLSCREEN or
                     EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            if (controller.state.onReceiveContent != null) outAttributes.contentMimeTypes = arrayOf("*/*")
             return TerminalInputConnection(view)
         }
     }
@@ -282,6 +285,20 @@ private class TerminalInputNode(
                 text.length > 1 && (text.contains('\n') || text.contains('\r')) -> controller.pasteText(text)
                 else -> controller.sendText(text)
             }
+        }
+
+        // Images, GIFs and stickers from the keyboard.
+        override fun commitContent(inputContentInfo: InputContentInfo, flags: Int, opts: Bundle?): Boolean {
+            val receive = controller.state.onReceiveContent ?: return false
+            if (flags and InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION != 0) {
+                try {
+                    inputContentInfo.requestPermission()
+                } catch (_: Exception) {
+                    return false
+                }
+            }
+            receive(GhosttyContent(inputContentInfo.contentUri, inputContentInfo::releasePermission))
+            return true
         }
 
         override fun performEditorAction(actionCode: Int): Boolean {

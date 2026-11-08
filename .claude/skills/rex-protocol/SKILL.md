@@ -162,6 +162,20 @@ the desktop gets its own size back.
   with `repliesToProgram = false`, and they send only what the user types.
 - Sizes go through `resize` with columns, rows and cell pixels. Only the newest pending size is
   sent, and it applies only while this client owns the pane.
+- Copies from programs (OSC 52) need no Rex call: the sequence stays in the data stream, and the
+  emulator puts the text on the phone's clipboard while the pane is on screen. Rex also sends
+  `clipboard_written`, which Rax ignores.
+
+## Sending files
+
+`RexHost.upload` (`Upload.kt`) sends files that the pane gets as a paste of their paths, in order.
+Per file: `upload_begin` gives a ticket, a `rex.data.bytes.v1` data connection takes the bytes in
+messages of at most 64 KiB, and an empty message ends the file. Files sent together share a
+`batch`. Rex ends each stream with 1000 once its file has arrived, and the last one after it typed
+the paths. Any other close code means nothing was typed and nothing stays on the computer. Closing
+a stream before Rex ends it stops the batch, which is how cancelling works. OkHttp keeps unsent
+messages in memory and closes the socket past 16 MiB, so the sender waits while more than 1 MiB is
+queued. Details are in `docs/rex-protocol.md` 5.10, and `LiveServerTest` covers a batch.
 
 ## Rex's built-in Tailscale
 

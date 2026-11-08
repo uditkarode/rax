@@ -544,7 +544,10 @@ internal class TerminalController(
     // Clipboard
 
     fun paste() {
-        pasteText(clipboard.getText() ?: return)
+        val receive = state.onReceiveContent
+        val file = if (receive != null) clipboard.getFile() else null
+        if (receive != null && file != null) receive(GhosttyContent(file) {})
+        else pasteText(clipboard.getText() ?: return)
     }
 
     /** Pastes [text], asking first when it could run commands by itself. */

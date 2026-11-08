@@ -1,5 +1,6 @@
 package io.github.xchacha20_poly1305.libghostty.compose
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -95,7 +96,13 @@ public class GhosttyTerminalState {
         controller?.sendKey(key, mods, text)
     }
 
-    /** Pastes the clipboard, asking first when the text could run commands by itself. */
+    /**
+     * Takes files the user puts into the terminal: an image or other file inserted from the keyboard, or pasted
+     * while the clipboard holds a file. Without it, the keyboard offers no files and pasting one does nothing.
+     */
+    public var onReceiveContent: ((GhosttyContent) -> Unit)? = null
+
+    /** Pastes the clipboard, asking first when the text could run commands by itself, or hands its file to [onReceiveContent]. */
     public fun paste() {
         controller?.paste()
     }
@@ -143,6 +150,9 @@ public class GhosttyTerminalState {
 
     internal var dialogRequest: DialogRequest? by mutableStateOf(null)
 }
+
+/** A file put into the terminal. Call [release] once it has been read, which may end the app's access to it. */
+public class GhosttyContent(public val uri: Uri, public val release: () -> Unit)
 
 @Composable
 public fun rememberGhosttyTerminalState(): GhosttyTerminalState = remember { GhosttyTerminalState() }

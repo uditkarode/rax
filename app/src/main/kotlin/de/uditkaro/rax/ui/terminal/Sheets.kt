@@ -52,6 +52,7 @@ fun ActionsSheet(
     tabTitle: String,
     paneTitle: String,
     sessionName: String,
+    onSendFiles: () -> Unit,
     onDismiss: () -> Unit,
     onLeave: () -> Unit,
 ) {
@@ -79,6 +80,12 @@ fun ActionsSheet(
             Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
                 SectionHeader(stringResource(R.string.action_group_pane))
                 Group(dividerInset = 52.dp) {
+                    row {
+                        SheetRow(R.drawable.ic_upload, stringResource(R.string.action_send_files)) {
+                            onDismiss()
+                            onSendFiles()
+                        }
+                    }
                     row {
                         SheetRow(R.drawable.ic_splitscreen_right, stringResource(R.string.action_split_right)) {
                             onDismiss()

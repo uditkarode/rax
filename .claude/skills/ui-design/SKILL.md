@@ -117,3 +117,7 @@ with a row to install it, which shows the download's progress and says when it f
   reconnecting over the last screen, or a message with one action. See `pane-pipeline`.
 - While a message covers the last screen, the screen takes no touches and the keys are off, and
   the keyboard closes. While there is no screen, the keys are off too.
+- Files go to the computer from Send files in the actions sheet, from images the keyboard inserts,
+  and from Paste while the clipboard holds a file. The pane gets their paths, as a file dropped on
+  a desktop terminal does. While they go out, a pill at the bottom of the terminal shows the
+  progress and a button that stops it.

@@ -100,6 +100,13 @@
     <string name="terminal_lost">Lost the connection to this pane</string>
     <string name="terminal_input_dropped">Couldn’t send what you typed</string>
     <string name="terminal_jump_to_bottom">Go to the bottom</string>
+    <string name="sending_file">Sending %1$s</string>
+    <string name="sending_files">Sending %1$d files</string>
+    <string name="sending_stop">Stop sending</string>
+    <string name="send_failed">Couldn’t send the file</string>
+    <string name="send_failed_many">Couldn’t send the files</string>
+    <string name="send_too_large">Too large to send</string>
+    <string name="send_needs_update">Update Rex on the computer to send files</string>
 
     <string name="key_esc">Escape</string>
     <string name="key_ctrl">Control</string>
@@ -132,6 +139,7 @@
     <string name="action_group_session">Session</string>
     <string name="action_split_right">Split right</string>
     <string name="action_split_down">Split down</string>
+    <string name="action_send_files">Send files</string>
     <string name="action_rename_pane">Rename pane</string>
     <string name="action_close_pane">Close pane</string>
     <string name="action_new_tab">New tab</string>

@@ -14,6 +14,8 @@ MIT, see `LICENSE`), Kotlin bindings for Ghostty's libghostty-vt, with these cha
 - The input method sees a plain text field without suggestions instead of a `TYPE_NULL` field, so
   keyboards offer voice input and gesture typing and show no number row
   (`TerminalInput.kt`).
+- `GhosttyTerminalState.onReceiveContent` takes the files the keyboard inserts (images, GIFs,
+  stickers) and the file that Paste finds on the clipboard (`GhosttyClipboard.getFile`).
 - `build-native.sh` builds the native part, in place of the upstream Gradle plugin, for arm64-v8a
   and x86_64 at API level 29.
 - The unit tests run on the JVM against a build of the JNI library for the computer that runs

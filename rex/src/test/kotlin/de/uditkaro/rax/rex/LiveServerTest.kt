@@ -63,6 +63,18 @@ class LiveServerTest {
             input.send("echo rax-says-$((6*7))\n".toByteArray())
             withTimeout(15_000) { while (!synchronized(seen) { seen.contains("rax-says-42") }) kotlinx.coroutines.delay(50) }
 
+            // Sent files arrive whole: the paths Rex types finish a wc command that counts their bytes.
+            val big = UploadFile("big file.bin", 3L * 1024 * 1024) { java.io.ByteArrayInputStream(ByteArray(3 * 1024 * 1024) { it.toByte() }) }
+            val small = UploadFile("small.txt", 6) { "hello\n".byteInputStream() }
+            input.send("wc -c ".toByteArray())
+            var sent = 0L
+            host.upload(sessionId, blockId, listOf(big, small)) { sent = it }
+            assertEquals(big.size + small.size, sent)
+            input.send("\n".toByteArray())
+            withTimeout(15_000) { while (!synchronized(seen) { seen.contains("3145728") && seen.contains("small.txt") }) kotlinx.coroutines.delay(50) }
+            host.upload(sessionId, blockId, listOf(UploadFile("one.txt", 3) { "abc".byteInputStream() })) {}
+            withTimeout(15_000) { while (!synchronized(seen) { seen.contains("one.txt") }) kotlinx.coroutines.delay(50) }
+
             host.endSession(sessionId)
             withTimeout(15_000) { host.state.first { it.session(sessionId) == null } }
             withTimeout(15_000) { reader.join() }
