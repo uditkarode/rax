@@ -1,11 +1,15 @@
 package de.uditkaro.rax
 
+import android.Manifest
 import android.app.Application
 import de.uditkaro.rax.connection.AlertService
 import de.uditkaro.rax.connection.Alerts
 import de.uditkaro.rax.connection.Connections
 import de.uditkaro.rax.connection.LocalNetwork
+import de.uditkaro.rax.connection.PermissionState
+import de.uditkaro.rax.connection.TailnetKeeper
 import de.uditkaro.rax.data.HostStore
+import de.uditkaro.rax.data.PermissionStore
 import de.uditkaro.rax.data.Settings
 import de.uditkaro.rax.data.SettingsStore
 import de.uditkaro.rax.terminal.TerminalFonts
@@ -32,6 +36,12 @@ import okhttp3.OkHttpClient
 class AppGraph(val app: Application) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /**
+     * Rax's built-in Tailscale node, run by [tailnetKeeper]. It is made before anything that starts
+     * a thread, because making it sets environment variables.
+     */
+    val tailnet: Tailnet = Tailnet.get(app)
+
     private val settingsStore = SettingsStore(app)
 
     /** Null until the first read from disk, which the splash screen waits for. */
@@ -44,12 +54,22 @@ class AppGraph(val app: Application) {
 
     val hostStore = HostStore(app)
 
-    /** Rax's built-in Tailscale node. It starts when a host uses Tailscale or when the user signs in. */
-    val tailnet: Tailnet = Tailnet.get(app)
-
     val localNetwork = LocalNetwork(app)
 
+    val notifications = PermissionState(app, Manifest.permission.POST_NOTIFICATIONS)
+
+    val permissions = PermissionStore(app, scope)
+
+    /**
+     * Background alerts are on and Rax may post them, so turning notifications off in system settings
+     * also stops them. Null until the settings are read from disk.
+     */
+    val backgroundAlerts: StateFlow<Boolean?> = combine(settings, notifications.granted) { s, granted ->
+        s?.let { it.backgroundAlerts && granted }
+    }.stateIn(scope, SharingStarted.Eagerly, null)
+
     private val http = OkHttpClient.Builder()
+        .dns(localNetwork.dns)
         .connectTimeout(10, TimeUnit.SECONDS)
         .pingInterval(25, TimeUnit.SECONDS)
         .build()
@@ -64,12 +84,20 @@ class AppGraph(val app: Application) {
         http = http,
         tailnetHttp = tailnetHttp,
         tailnetUp = tailnet.status.map { it is TailnetStatus.Running }.stateIn(scope, SharingStarted.Eagerly, false),
-        keepInBackground = settings.map { it?.backgroundAlerts == true }.stateIn(scope, SharingStarted.Eagerly, false),
+        keepInBackground = backgroundAlerts.map { it == true }.stateIn(scope, SharingStarted.Eagerly, false),
+    )
+
+    /** Runs [tailnet] while a saved host uses it and [connections] is in use, or while something holds it. */
+    val tailnetKeeper = TailnetKeeper(
+        scope = scope,
+        hostsNeed = combine(connections.hosts, connections.inUse) { hosts, inUse -> hosts?.let { inUse && it.any { host -> host.tailnet } } },
+        start = { tailnet.start() },
+        stop = { tailnet.stop() },
     )
 
     /** Background alerts are on and there is a host to watch; null until both are read from disk. */
-    private val watching = combine(settings, connections.hosts) { s, hosts ->
-        if (s == null || hosts == null) null else s.backgroundAlerts && hosts.isNotEmpty()
+    private val watching = combine(backgroundAlerts, connections.hosts) { on, hosts ->
+        if (on == null || hosts == null) null else on && hosts.isNotEmpty()
     }.stateIn(scope, SharingStarted.Eagerly, null)
 
     init {
@@ -81,9 +109,6 @@ class AppGraph(val app: Application) {
         }
         Alerts(app, connections, scope)
         scope.launch { watching.filterNotNull().collect { syncAlertService() } }
-        scope.launch {
-            connections.hosts.collect { hosts -> if (hosts.orEmpty().any { it.tailnet }) tailnet.start() }
-        }
         // LAN hosts that waited for the permission connect as soon as it is granted, without waiting
         // out their retry delay.
         scope.launch {

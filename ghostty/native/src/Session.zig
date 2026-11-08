@@ -72,6 +72,7 @@ progress_state: i32 = 0,
 progress_percent: i32 = -1,
 color_scheme_dark: bool = true,
 background: i32 = 0,
+foreground: i32 = 0,
 
 /// The session's GhosttyVtCallbacks, for clipboard reads the program
 /// requests. `env` is only set while Kotlin is inside a call that can run
@@ -146,6 +147,11 @@ pub fn restore(alloc: std.mem.Allocator, callbacks: jni.Object, opts: RestoreOpt
     self.terminal = decoded.toOwned();
     errdefer self.terminal.deinit(alloc);
 
+    // The snapshot carries the encoder's settings. Apply this host's, as
+    // `create` does.
+    self.terminal.flags.shell_redraws_prompt = .false;
+    self.terminal.setKittyGraphicsSizeLimit(alloc, kitty_image_storage_limit);
+
     try self.initStream(opts.terminfo_name);
 
     // The snapshot can end inside an escape sequence. Replaying the rest of it
@@ -218,6 +224,7 @@ fn initStream(self: *Session, terminfo_name: ?[]const u8) !void {
     self.stream = .init(.{ .allocator = alloc, .handler = handler });
 
     self.background = self.effectiveBackground();
+    self.foreground = self.effectiveForeground();
 }
 
 pub fn destroy(self: *Session) void {
@@ -248,12 +255,16 @@ pub fn write(self: *Session, env: *jni.Env, data: []const u8) void {
     defer self.env = null;
     self.stream.nextSlice(data);
 
-    // OSC 11 changes the background without any effect callback; diff the
-    // effective color around each write to surface it as an event.
+    // OSC 10 and 11 change the default colors without any effect callback
+    // or dirty flag; diff the effective colors around each write to surface
+    // a change as an event and to redraw every row in the new colors.
     const background = self.effectiveBackground();
-    if (background != self.background) {
+    const foreground = self.effectiveForeground();
+    if (background != self.background) self.pending_events |= Event.colors;
+    if (background != self.background or foreground != self.foreground) {
         self.background = background;
-        self.pending_events |= Event.colors;
+        self.foreground = foreground;
+        self.markDirty();
     }
 }
 
@@ -269,13 +280,18 @@ pub fn resize(self: *Session, cols: u16, rows: u16, cell_width_px: u32, cell_hei
 }
 
 /// ghostty's Screen.select does not mark the selected rows dirty, so
-/// selection and theme changes force a full redraw.
+/// selection, theme and default color changes force a full redraw.
 pub fn markDirty(self: *Session) void {
     self.render.dirty = .full;
 }
 
 pub fn effectiveBackground(self: *Session) i32 {
     const rgb = self.terminal.colors.background.get() orelse return 0;
+    return argb(rgb);
+}
+
+pub fn effectiveForeground(self: *Session) i32 {
+    const rgb = self.terminal.colors.foreground.get() orelse return 0;
     return argb(rgb);
 }
 
@@ -387,6 +403,7 @@ fn clipboardRead(handler: *Handler, read: vt.clipboard.Read) void {
     const self = fromHandler(handler);
     const env = self.env orelse return read.reply(.denied);
     const methods = callback_methods orelse return read.reply(.denied);
+    if (self.callbacks == null) return read.reply(.denied);
 
     const text_mime: ?[]const u8 = for (read.mimes) |mime| {
         if (vt.clipboard.isTextMime(mime)) break mime;

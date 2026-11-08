@@ -104,8 +104,11 @@ pub const Env = extern struct {
     }
 
     /// Copies a Java string as modified UTF-8 into memory owned by `alloc`.
-    pub fn stringAlloc(self: *Env, alloc: std.mem.Allocator, string: String) ![]u8 {
-        const bytes = try alloc.alloc(u8, @intCast(self.call("GetStringUTFLength", .{string})));
+    /// GetStringUTFRegion writes a NUL after the bytes, so the copy has room
+    /// for one, even for an empty string.
+    pub fn stringAlloc(self: *Env, alloc: std.mem.Allocator, string: String) ![:0]u8 {
+        const len: usize = @intCast(self.call("GetStringUTFLength", .{string}));
+        const bytes = try alloc.allocSentinel(u8, len, 0);
         self.call("GetStringUTFRegion", .{ string, 0, self.call("GetStringLength", .{string}), bytes.ptr });
         return bytes;
     }

@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,7 +33,9 @@ import de.uditkaro.rax.ui.components.RaxIcon
 import de.uditkaro.rax.ui.components.RenameDialog
 import de.uditkaro.rax.ui.components.RowBase
 import de.uditkaro.rax.ui.components.SectionHeader
+import de.uditkaro.rax.ui.showActionFailed
 import io.github.xchacha20_poly1305.libghostty.compose.GhosttyTerminalState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -57,8 +60,18 @@ fun ActionsSheet(
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var pending by remember { mutableStateOf<Pending?>(null) }
     val sid = vm.sessionId
+    val context = LocalContext.current.applicationContext
+    // The sheet is gone by the time an action fails, so the failure shows as a toast.
     fun run(block: suspend () -> Unit) {
-        graph.scope.launch(Dispatchers.Main) { runCatching { block() } }
+        graph.scope.launch(Dispatchers.Main) {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                showActionFailed(context, e)
+            }
+        }
     }
 
     if (pending == null) {

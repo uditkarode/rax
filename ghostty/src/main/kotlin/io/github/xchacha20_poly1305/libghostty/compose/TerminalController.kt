@@ -16,6 +16,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.platform.TextToolbar
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.util.fastCoerceAtLeast
 import androidx.compose.ui.util.fastCoerceIn
 import io.github.xchacha20_poly1305.libghostty.GhosttyCellFlags
@@ -31,6 +32,8 @@ import io.github.xchacha20_poly1305.libghostty.GhosttyScrollbar
 import io.github.xchacha20_poly1305.libghostty.GhosttyTerminal
 import io.github.xchacha20_poly1305.libghostty.GhosttyTerminalHost
 import io.github.xchacha20_poly1305.libghostty.GhosttyTerminalSession
+import io.github.xchacha20_poly1305.libghostty.R
+import io.github.xchacha20_poly1305.libghostty.logError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -59,6 +62,9 @@ internal class TerminalController(
     lateinit var uriHandler: UriHandler
     lateinit var haptics: HapticFeedback
     lateinit var textToolbar: TextToolbar
+
+    /** Shows a short message, a string resource, over the app. */
+    lateinit var showMessage: (Int) -> Unit
     var onFinishedSessionKey: () -> Unit = {}
 
     /** Shows the software keyboard; set by the platform input modifier while it is attached. */
@@ -122,7 +128,25 @@ internal class TerminalController(
     var focused by mutableStateOf(false)
         private set
 
+    /** Whether the window has input focus; null until it is first reported. */
+    private var windowFocused: Boolean? = null
+
+    /** Whether the terminal's lifecycle is at least started, so the user can see it. */
+    private var started = true
+
+    /** Whether an accessibility service is on, so the viewport text is worth building. */
+    private var accessibilityEnabled = false
+
+    /** Whether the terminal has a selection, in the viewport or not. */
     var selectionActive by mutableStateOf(false)
+        private set
+
+    /** Whether part of the selection is in the viewport, as of the last frame. */
+    var selectionVisible by mutableStateOf(false)
+        private set
+
+    /** The first and last selected cells as of the last frame. Either row may lie outside the viewport. */
+    var selectionEnds: Pair<Cell, Cell>? = null
         private set
 
     /** Where a mouse context menu is open, or null. */
@@ -133,6 +157,17 @@ internal class TerminalController(
     var accessibilityText: String? by mutableStateOf(null)
         private set
     private var accessibilityJob: Job? = null
+
+    /** How much larger the terminal draws while a pinch is in progress; 1 at rest. */
+    var pinchScale by mutableFloatStateOf(1f)
+        private set
+
+    /** The point the pinch scales the drawing around, in view coordinates. */
+    var pinchPivot = Offset.Zero
+        private set
+
+    /** The font size the pinch in progress applies when it ends. */
+    private var pinchFontSize: TextUnit? = null
 
     private val kittyImages = KittyImageCache()
 
@@ -163,6 +198,8 @@ internal class TerminalController(
         glyphs = GlyphPainter(fontFamily, fontSizePx, resolver)
         if (selectionActive) clearSelection()
         relayout(force = true)
+        // A pinch keeps the drawing scaled until its font size applies here.
+        pinchScale = 1f
     }
 
     fun setSize(width: Int, height: Int) {
@@ -207,6 +244,9 @@ internal class TerminalController(
 
     // GhosttyTerminalHost
 
+    override val isVisible: Boolean
+        get() = started
+
     override fun onTerminalChanged() = requestFrame()
 
     override fun onBell() {
@@ -216,6 +256,11 @@ internal class TerminalController(
     }
 
     override fun requestClipboardRead(respond: (approved: Boolean) -> Unit) {
+        // The program asks on its own; it must not replace a dialog the user is answering.
+        if (state.dialogRequest != null) {
+            respond(false)
+            return
+        }
         state.dialogRequest = GhosttyTerminalState.DialogRequest.ClipboardRead(respond)
     }
 
@@ -254,9 +299,15 @@ internal class TerminalController(
                 return@withTerminal FrameResult.UNCHANGED
             }
             kittyImages.update(terminal, render)
-            if (selectionActive && (0 until render.rows).none { render.selection(it) != null }) {
-                selectionActive = false
+            selectionActive = terminal.hasSelection
+            selectionEnds = if (selectionActive) {
+                terminal.selectionBounds()?.let { Cell(it[0], it[1]) to Cell(it[2], it[3]) }
+            } else {
+                null
             }
+            val visible = selectionActive && (0 until render.rows).any { render.selection(it) != null }
+            if (selectionVisible && !visible) textToolbar.hide()
+            selectionVisible = visible
             syncBlink()
             scheduleAccessibilityText()
             frame++
@@ -280,10 +331,21 @@ internal class TerminalController(
     fun kittyImage(generation: Long): ImageBitmap? = kittyImages[generation]
 
     private fun scheduleAccessibilityText() {
-        if (accessibilityJob?.isActive == true) return
+        if (!accessibilityEnabled || accessibilityJob?.isActive == true) return
         accessibilityJob = scope.launch {
             delay(ACCESSIBILITY_TEXT_DELAY)
             accessibilityText = session?.withTerminal { it.viewportText() }
+        }
+    }
+
+    fun onAccessibilityChanged(enabled: Boolean) {
+        if (enabled == accessibilityEnabled) return
+        accessibilityEnabled = enabled
+        if (enabled) {
+            scheduleAccessibilityText()
+        } else {
+            accessibilityJob?.cancel()
+            accessibilityText = null
         }
     }
 
@@ -294,8 +356,13 @@ internal class TerminalController(
         syncBlink()
     }
 
+    fun onStartedChanged(value: Boolean) {
+        started = value
+        syncBlink()
+    }
+
     private fun syncBlink() {
-        val wants = render.cursorBlinking && render.cursorVisible && focused
+        val wants = render.cursorBlinking && render.cursorVisible && focused && windowFocused != false && started
         if (wants && blinkJob?.isActive != true) {
             blinkJob = scope.launch {
                 while (true) {
@@ -448,15 +515,22 @@ internal class TerminalController(
         }
     }
 
+    /** Reports the window's focus to the program, on each change and to each session that is attached. */
     fun onWindowFocusChanged(focused: Boolean) {
+        windowFocused = focused
+        syncBlink()
         session?.sendFocus(focused)
     }
 
     // Clipboard
 
     fun paste() {
-        val text = clipboard.getText()
-        if (text.isNullOrEmpty() || session == null) return
+        pasteText(clipboard.getText() ?: return)
+    }
+
+    /** Pastes [text], asking first when it could run commands by itself. */
+    fun pasteText(text: String) {
+        if (text.isEmpty() || session == null) return
         if (GhosttyTerminal.isPasteSafe(text)) {
             sendPaste(text)
         } else {
@@ -470,15 +544,29 @@ internal class TerminalController(
     }
 
     fun copySelection() {
-        val text = session?.withTerminal { it.selectionText() } ?: return
-        clipboard.setText(text)
+        val session = session ?: return
+        val text = session.withTerminal { it.selectionText(MAX_COPY_BYTES) }
+        if (text == null) {
+            if (session.withTerminal { it.hasSelection } == true) showMessage(R.string.ghostty_copy_too_long)
+            return
+        }
+        try {
+            clipboard.setText(text)
+        } catch (e: Exception) {
+            logError(TAG, "clipboard write failed", e)
+            showMessage(R.string.ghostty_copy_failed)
+            return
+        }
         clearSelection()
     }
 
     // Selection
 
+    /** Selects the word at a cell; without one, clears the selection. */
     fun selectWord(column: Int, row: Int): Boolean {
-        val selected = session?.withTerminal { it.selectWord(column, row) } ?: false
+        val selected = session?.withTerminal { terminal ->
+            terminal.selectWord(column, row).also { if (!it) terminal.clearSelection() }
+        } ?: false
         selectionActive = selected
         requestFrame()
         return selected
@@ -493,21 +581,22 @@ internal class TerminalController(
 
     /**
      * Extends the selection from the anchor cell to the cell under [position]. Dragging onto the first or last row
-     * clear of the padding scrolls, and the anchor with it.
+     * clear of the padding scrolls, and the anchor with it, past the edge of the viewport if it must.
      */
     fun dragSelection(anchor: Cell, position: Offset, biasRows: Int = 0): Cell {
         val column = columnAt(position.x)
-        val row = (rowAt(position.y) - biasRows).fastCoerceIn(0, rows - 1)
+        // Not clamped to the grid, so a handle hanging below the finger still reaches the last row.
+        val target = floor((position.y - gridOrigin.y) / (glyphs?.cellHeight ?: 1)).toInt() - biasRows
+        val row = target.fastCoerceIn(0, max(rows - 1, 0))
         var anchorRow = anchor.row
         session?.withTerminal { terminal ->
             val edge = when {
-                row <= rowAt(padding.top) -> -1
-                row >= rowAt(heightPx - padding.bottom - 1) -> 1
+                target <= rowAt(padding.top) -> -1
+                target >= rowAt(heightPx - padding.bottom - 1) -> 1
                 else -> 0
             }
             if (edge != 0) {
-                val moved = scrollScrollback(terminal, edge)
-                anchorRow = (anchorRow - moved).fastCoerceIn(0, rows - 1)
+                anchorRow -= scrollScrollback(terminal, edge)
             }
             selectionActive = terminal.select(anchor.column, anchorRow, column, row)
         }
@@ -563,11 +652,12 @@ internal class TerminalController(
                 bottom = (last.row + 1) * glyphs.cellHeight.toFloat(),
             )
         } else {
+            val row = at.row.fastCoerceIn(0, max(rows - 1, 0))
             Rect(
                 left = at.column * glyphs.cellWidth,
-                top = at.row * glyphs.cellHeight.toFloat(),
+                top = row * glyphs.cellHeight.toFloat(),
                 right = (at.column + 1) * glyphs.cellWidth,
-                bottom = (at.row + 1) * glyphs.cellHeight.toFloat(),
+                bottom = (row + 1) * glyphs.cellHeight.toFloat(),
             )
         }
         val local = inGrid.translate(gridOrigin)
@@ -579,7 +669,11 @@ internal class TerminalController(
                 null
             },
             onPasteRequested = ::paste,
-            onSelectAllRequested = ::selectAll,
+            onSelectAllRequested = {
+                selectAll()
+                // The toolbar closes after each item; bring it back so the selection can be copied.
+                if (selectionActive) scope.launch { showTextToolbar(at) }
+            },
         )
     }
 
@@ -623,9 +717,24 @@ internal class TerminalController(
     fun showLinkMenu(url: String) {
         state.dialogRequest = GhosttyTerminalState.DialogRequest.LinkMenu(
             url,
-            openLink = { uriHandler.openUri(url) },
+            openLink = { openLink(url) },
             copyUrl = { clipboard.setText(url) },
         )
+    }
+
+    /**
+     * Opens a web or mail link in another app. Links come from the program's output, so other schemes, such as
+     * `file:` for a file on the remote computer, are not handed to the system.
+     */
+    fun openLink(url: String) {
+        val scheme = url.substringBefore(':', missingDelimiterValue = "").lowercase()
+        val opened = scheme in OPENABLE_LINK_SCHEMES && try {
+            uriHandler.openUri(url)
+            true
+        } catch (_: Exception) {
+            false
+        }
+        if (!opened) showMessage(R.string.ghostty_link_unavailable)
     }
 
     // Scrolling and mouse
@@ -803,8 +912,26 @@ internal class TerminalController(
     val gridWidth: Float
         get() = ceil(columns * (glyphs?.cellWidth ?: 0f))
 
-    fun changeFontSize(steps: Int) {
-        state.fontSizeSteps(steps)
+    /**
+     * Shows the pinch in progress: [steps] sp away from the current font size, drawn by scaling around [pivot].
+     * The font size itself changes once, in [endPinch].
+     */
+    fun pinchTo(steps: Int, pivot: Offset) {
+        val current = state.fontSize
+        val target = state.fontSizeAfter(steps)
+        pinchFontSize = target
+        pinchPivot = pivot
+        pinchScale = target.value / current.value
+    }
+
+    fun endPinch() {
+        val target = pinchFontSize ?: return
+        pinchFontSize = null
+        if (target == state.fontSize) {
+            pinchScale = 1f
+        } else {
+            state.zoomedFontSize = target
+        }
     }
 
     data class Cell(val column: Int, val row: Int)
@@ -816,10 +943,16 @@ internal class TerminalController(
     }
 
     private companion object {
+        const val TAG = "GhosttyTerminal"
         val BLINK_INTERVAL = 600.milliseconds
         val SYNC_OUTPUT_RETRY = 32.milliseconds
         const val SYNC_OUTPUT_TIMEOUT_MS = 1000L
         val ACCESSIBILITY_TEXT_DELAY = 500.milliseconds
+
+        /** At most 512 KB as UTF-16, well inside the 1 MB that one Binder call on Android can carry. */
+        const val MAX_COPY_BYTES = 256 * 1024
+
+        val OPENABLE_LINK_SCHEMES = setOf("http", "https", "mailto")
     }
 }
 

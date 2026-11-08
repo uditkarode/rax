@@ -2,6 +2,10 @@ package io.github.xchacha20_poly1305.libghostty
 
 /** The UI showing a [GhosttyTerminalSession]. Methods are called on the main thread. */
 public interface GhosttyTerminalHost {
+    /** Whether the user can see the terminal now. Clipboard writes from the program apply only while it is true. */
+    public val isVisible: Boolean
+        get() = true
+
     /** The terminal changed and should be redrawn. */
     public fun onTerminalChanged() {}
 

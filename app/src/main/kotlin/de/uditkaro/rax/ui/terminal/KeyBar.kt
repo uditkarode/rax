@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,17 +48,23 @@ import de.uditkaro.rax.R
 import de.uditkaro.rax.theme.Rax
 import de.uditkaro.rax.theme.RaxType
 import de.uditkaro.rax.ui.components.RaxIcon
-import io.github.xchacha20_poly1305.libghostty.compose.GhosttyExtraKeysState
 import io.github.xchacha20_poly1305.libghostty.compose.GhosttyExtraKeysState.StickyState
 import io.github.xchacha20_poly1305.libghostty.compose.GhosttyTerminalState
+import io.github.xchacha20_poly1305.libghostty.compose.rememberGhosttyExtraKeysState
 
 /**
  * A tap on Ctrl or Alt applies it to the next key, and a double tap keeps it on. Arrows repeat
- * while held. Holding Tab sends Shift+Tab.
+ * while held. Holding Tab sends Shift+Tab. Ctrl and Alt apply only while the bar shows, and turn
+ * off when it goes.
  */
 @Composable
-fun KeyBar(terminal: GhosttyTerminalState, extraKeys: GhosttyExtraKeysState, onHideKeyboard: () -> Unit, modifier: Modifier = Modifier) {
+fun KeyBar(terminal: GhosttyTerminalState, onHideKeyboard: () -> Unit, modifier: Modifier = Modifier) {
     val c = Rax.colors
+    val extraKeys = rememberGhosttyExtraKeysState()
+    DisposableEffect(terminal, extraKeys) {
+        terminal.stickyModifiers = extraKeys
+        onDispose { if (terminal.stickyModifiers === extraKeys) terminal.stickyModifiers = null }
+    }
     val ctrl by extraKeys.ctrl.collectAsState()
     val alt by extraKeys.alt.collectAsState()
     Row(

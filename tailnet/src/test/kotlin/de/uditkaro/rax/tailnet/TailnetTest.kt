@@ -17,7 +17,7 @@ class TailnetTest {
     private val node = FakeNode()
     private val network = FakeNetworkWatcher()
 
-    private fun tailnet(dispatcher: CoroutineDispatcher) = Tailnet(
+    private fun tailnet(dispatcher: CoroutineDispatcher, interfaces: () -> String = { "[]" }) = Tailnet(
         stateDir = File("/data/state/tailnet"),
         defaultHostname = "rax-pixel-9",
         deviceModel = "Google Pixel 9",
@@ -25,6 +25,7 @@ class TailnetTest {
         node = node,
         network = network,
         dispatcher = dispatcher,
+        listInterfaces = interfaces,
     )
 
     private val running = """
@@ -103,6 +104,65 @@ class TailnetTest {
         val e = runCatching { tailnet.login() }.exceptionOrNull()
         assertTrue(e is TailnetException)
         assertEquals("login failed: control unreachable", e!!.message)
+    }
+
+    @Test
+    fun retryRestartsANodeInError() = runTest {
+        val tailnet = tailnet(UnconfinedTestDispatcher(testScheduler))
+        tailnet.start("rax-test")
+        node.host.onStatus("""{"state":"Stopped","error":"tailnet requires logging","loggingRequired":true}""")
+        assertEquals(TailnetStatus.Error("tailnet requires logging", loggingRequired = true), tailnet.status.value)
+
+        // start() leaves a started node alone, so only retry() gets it out of the error.
+        tailnet.start()
+        assertEquals(1, node.starts)
+        tailnet.retry()
+        assertEquals(1, node.stops)
+        assertEquals(2, node.starts)
+        assertEquals("rax-test", node.started!![1])
+        assertEquals(TailnetStatus.Starting, tailnet.status.value)
+    }
+
+    @Test
+    fun retryLeavesAWorkingNodeAlone() = runTest {
+        val tailnet = tailnet(UnconfinedTestDispatcher(testScheduler))
+        tailnet.retry()
+        node.host.onStatus(running)
+        tailnet.retry()
+        assertEquals(1, node.starts)
+        assertEquals(0, node.stops)
+        assertTrue(tailnet.status.value is TailnetStatus.Running)
+    }
+
+    @Test
+    fun retryStartsANodeThatFailedToStart() = runTest {
+        node.startError = Exception("cannot create state dir")
+        val tailnet = tailnet(UnconfinedTestDispatcher(testScheduler))
+        tailnet.start()
+        node.startError = null
+        tailnet.retry()
+        assertEquals(1, node.starts)
+        assertEquals(0, node.stops)
+        assertEquals(TailnetStatus.Starting, tailnet.status.value)
+    }
+
+    @Test
+    fun failedInterfaceListGivesGoTheLastGoodOne() = runTest {
+        var fail = false
+        val tailnet = tailnet(UnconfinedTestDispatcher(testScheduler)) {
+            if (fail) throw java.net.SocketException("getifaddrs failed") else """[{"name":"wlan0"}]"""
+        }
+        tailnet.start()
+        assertEquals("""[{"name":"wlan0"}]""", node.host.interfaces())
+        fail = true
+        assertEquals("""[{"name":"wlan0"}]""", node.host.interfaces())
+    }
+
+    @Test
+    fun failedFirstInterfaceListIsEmpty() = runTest {
+        val tailnet = tailnet(UnconfinedTestDispatcher(testScheduler)) { throw IllegalStateException() }
+        tailnet.start()
+        assertEquals("[]", node.host.interfaces())
     }
 
     @Test

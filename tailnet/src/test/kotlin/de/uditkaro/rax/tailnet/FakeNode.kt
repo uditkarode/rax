@@ -3,6 +3,7 @@ package de.uditkaro.rax.tailnet
 internal class FakeNode : Node {
     lateinit var host: NodeHost
     var started: List<String>? = null
+    var starts = 0
     var startError: Exception? = null
     var loginError: Exception? = null
     var stops = 0
@@ -18,6 +19,7 @@ internal class FakeNode : Node {
     override fun start(dir: String, hostname: String, deviceModel: String, osVersion: String) {
         startError?.let { throw it }
         started = listOf(dir, hostname, deviceModel, osVersion)
+        starts++
     }
 
     override fun stop() {

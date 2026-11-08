@@ -51,7 +51,7 @@ class TerminalFonts(private val context: Context) {
     sealed interface ImportResult {
         data class Added(val names: List<String>) : ImportResult
         data class Failed(val reason: Reason) : ImportResult
-        enum class Reason { NotAFont, NotMonospaced, Unreadable }
+        enum class Reason { NotAFont, NotMonospaced, Unreadable, NotSaved }
     }
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
@@ -151,7 +151,7 @@ class TerminalFonts(private val context: Context) {
     /**
      * Adds the faces in [uris], grouped into families by their font names, so picking Regular,
      * Bold and Italic files together gives one family. A family that is already there gains the
-     * new faces.
+     * new faces, and a new face replaces the one it has with the same weight and slant.
      */
     suspend fun import(uris: List<Uri>): ImportResult = withContext(Dispatchers.IO) {
         lock.withLock {
@@ -160,7 +160,9 @@ class TerminalFonts(private val context: Context) {
                     .getOrElse { return@withContext ImportResult.Failed(ImportResult.Reason.Unreadable) }
                 val faces = runCatching { OpenType.read(bytes) }
                     .getOrElse { return@withContext ImportResult.Failed(ImportResult.Reason.NotAFont) }
-                Triple(displayName(uri), bytes, faces)
+                val name = runCatching { displayName(uri) }
+                    .getOrElse { return@withContext ImportResult.Failed(ImportResult.Reason.Unreadable) }
+                Triple(name, bytes, faces)
             }
             if (read.any { (_, _, faces) -> faces.none { it.monospaced } }) {
                 return@withContext ImportResult.Failed(ImportResult.Reason.NotMonospaced)
@@ -168,32 +170,45 @@ class TerminalFonts(private val context: Context) {
 
             val families = imported.associateBy { it.id }.toMutableMap()
             val added = LinkedHashSet<String>()
-            for ((fileName, bytes, faces) in read) {
-                for ((family, familyFaces) in faces.filter { it.monospaced }.groupBy { it.family }) {
-                    val id = "user-" + family.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
-                    val folder = File(dir, id).apply { mkdirs() }
-                    val ext = fileName.substringAfterLast('.', "ttf").lowercase().take(4)
-                    val file = "${bytes.contentHashCode().toUInt().toString(16)}.$ext"
-                    File(folder, file).writeBytes(bytes)
-                    val existing = families[id]?.faces.orEmpty()
-                    val newFaces = familyFaces.map { ImportedFace(file, it.index, it.weight, it.italic) }
-                    families[id] = Imported(id, family, (existing + newFaces).distinctBy { it.weight to it.italic })
-                    added += family
-                    full.remove(id)
-                    previews.remove(id)
+            try {
+                for ((fileName, bytes, faces) in read) {
+                    for ((family, familyFaces) in faces.filter { it.monospaced }.groupBy { it.family }) {
+                        val id = familyId(family) { families[it]?.name }
+                        val folder = File(dir, id).apply { mkdirs() }
+                        val ext = fileName.substringAfterLast('.', "ttf").lowercase().take(4)
+                        val file = "${bytes.contentHashCode().toUInt().toString(16)}.$ext"
+                        File(folder, file).writeBytes(bytes)
+                        val existing = families[id]?.faces.orEmpty()
+                        val newFaces = familyFaces.map { ImportedFace(file, it.index, it.weight, it.italic) }
+                        families[id] = Imported(id, family, (newFaces + existing).distinctBy { it.weight to it.italic })
+                        added += family
+                        full.remove(id)
+                        previews.remove(id)
+                    }
                 }
+                save(families.values.sortedBy { it.name.lowercase() })
+            } catch (e: Exception) {
+                Log.w(TAG, "could not save imported fonts", e)
+                return@withContext ImportResult.Failed(ImportResult.Reason.NotSaved)
             }
-            save(families.values.sortedBy { it.name.lowercase() })
+            // Files whose faces were all replaced.
+            for (family in families.values.filter { it.name in added }) {
+                val used = family.faces.map { it.file }.toSet()
+                File(dir, family.id).listFiles()?.filter { it.name !in used }?.forEach { it.delete() }
+            }
             ImportResult.Added(added.toList())
         }
     }
 
     suspend fun remove(id: String) = withContext(Dispatchers.IO) {
         lock.withLock {
-            File(dir, id).deleteRecursively()
-            full.remove(id)
-            previews.remove(id)
-            save(imported.filterNot { it.id == id })
+            val saved = runCatching { save(imported.filterNot { it.id == id }) }
+            saved.exceptionOrNull()?.let { Log.w(TAG, "could not remove font $id", it) }
+            if (saved.isSuccess) {
+                File(dir, id).deleteRecursively()
+                full.remove(id)
+                previews.remove(id)
+            }
         }
     }
 
@@ -201,7 +216,7 @@ class TerminalFonts(private val context: Context) {
         dir.mkdirs()
         val tmp = File(dir, "imported.json.tmp")
         tmp.writeText(json.encodeToString(list))
-        tmp.renameTo(manifest)
+        check(tmp.renameTo(manifest)) { "could not replace $manifest" }
         _imported.value = list
         _importedChoices.update { list.map { Choice(it.id, it.name, imported = true) } }
     }
@@ -215,7 +230,19 @@ class TerminalFonts(private val context: Context) {
             if (c.moveToFirst()) c.getString(0) else null
         } ?: uri.lastPathSegment ?: "font.ttf"
 
-    private companion object {
-        const val TAG = "TerminalFonts"
+    internal companion object {
+        private const val TAG = "TerminalFonts"
+
+        /**
+         * The ID of the imported family named [family], from its name. A name with no Latin letters or digits, or
+         * one whose ID another family has ([nameOf] gives the name of the family with an ID), gets an ID from a hash
+         * of the whole name.
+         */
+        fun familyId(family: String, nameOf: (id: String) -> String?): String {
+            val slug = family.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+            val id = "user-$slug"
+            if (slug.isNotEmpty() && nameOf(id).let { it == null || it == family }) return id
+            return "user-" + family.hashCode().toUInt().toString(16)
+        }
     }
 }

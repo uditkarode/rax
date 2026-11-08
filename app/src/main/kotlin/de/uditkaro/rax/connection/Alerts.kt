@@ -13,11 +13,13 @@ import de.uditkaro.rax.MainActivity
 import de.uditkaro.rax.R
 import de.uditkaro.rax.data.Host
 import de.uditkaro.rax.rex.Alert
+import de.uditkaro.rax.rex.Attach
 import de.uditkaro.rax.rex.HostState
 import de.uditkaro.rax.ui.home.appName
 import de.uditkaro.rax.ui.home.waitingText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -40,11 +42,20 @@ class Alerts(private val app: Application, private val connections: Connections,
                     .apply { setShowBadge(false) },
             ),
         )
+        // Waiting notifications posted before Android restarted the app are still in the shade.
+        for (n in manager.activeNotifications) {
+            if (n.id != ID_WAITING) continue
+            val (hostId, blockId) = paneOf(n.tag) ?: continue
+            shown.getOrPut(hostId) { mutableSetOf() } += blockId
+        }
         scope.launch {
             connections.alerts.collect { (host, alert) -> withContext(Dispatchers.Main) { post(host, alert) } }
         }
         scope.launch {
             connections.states.collect { states -> withContext(Dispatchers.Main) { withdraw(states) } }
+        }
+        scope.launch {
+            connections.hosts.filterNotNull().collect { hosts -> withContext(Dispatchers.Main) { forgetRemoved(hosts) } }
         }
     }
 
@@ -66,6 +77,8 @@ class Alerts(private val app: Application, private val connections: Connections,
             .setSubText(host.name)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
+            // A pane that still waits after a restart or a reconnect is posted again; it sounds only the first time.
+            .setOnlyAlertOnce(alert is Alert.Waiting)
             .setContentIntent(openPane(host, alert, state))
             .build()
         val tag = tag(host.id, alert.blockId)
@@ -77,15 +90,35 @@ class Alerts(private val app: Application, private val connections: Connections,
         for ((hostId, blocks) in shown) {
             val state = states[hostId] ?: continue
             if (!state.ready) continue
-            val done = blocks.filter { state.blocks[it]?.waiting == null }
+            val done = blocks.filter { blockId ->
+                val facts = state.blocks[blockId]
+                // Until a pane's status is read, nothing says whether it still waits. A pane missing
+                // from every view is gone, and so is one in a session Rex does not let Rax attach.
+                if (facts != null) {
+                    facts.statusRead && facts.waiting == null
+                } else {
+                    state.sessions.all { it.view != null || it.attach == Attach.Failed }
+                }
+            }
             done.forEach { manager.cancel(tag(hostId, it), ID_WAITING) }
             blocks -= done.toSet()
         }
     }
 
+    /** Takes away the notifications of hosts the user removed. */
+    private fun forgetRemoved(hosts: List<Host>) {
+        val ids = hosts.map { it.id }.toSet()
+        for (n in manager.activeNotifications) {
+            if (n.id != ID_WAITING && n.id != ID_NOTIFICATION) continue
+            val (hostId, _) = paneOf(n.tag) ?: continue
+            if (hostId !in ids) manager.cancel(n.tag, n.id)
+        }
+        shown.keys.retainAll(ids)
+    }
+
     private fun openPane(host: Host, alert: Alert, state: HostState?): PendingIntent {
         val windowId = state?.session(alert.sessionId)?.view?.tabs
-            ?.firstOrNull { w -> w.blocks.any { it.id == alert.blockId } }?.id
+            ?.firstOrNull { w -> w.allBlocks.any { it.id == alert.blockId } }?.id
         val intent = Intent(app, MainActivity::class.java)
             .setAction(ACTION_OPEN_PANE)
             .putExtra(EXTRA_HOST, host.id)
@@ -102,6 +135,12 @@ class Alerts(private val app: Application, private val connections: Connections,
     }
 
     private fun tag(hostId: String, blockId: String) = "$hostId/$blockId"
+
+    /** The host and pane IDs in a notification [tag]. */
+    private fun paneOf(tag: String?): Pair<String, String>? {
+        if (tag == null || '/' !in tag) return null
+        return tag.substringBeforeLast('/') to tag.substringAfterLast('/')
+    }
 
     companion object {
         const val CHANNEL_ALERTS = "alerts"

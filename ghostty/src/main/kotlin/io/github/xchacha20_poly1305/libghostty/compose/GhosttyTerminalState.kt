@@ -75,11 +75,12 @@ public class GhosttyTerminalState {
     internal var zoomedFontSize: TextUnit? by mutableStateOf(null)
     internal var baseFontSize: TextUnit = 14.sp
 
-    internal fun fontSizeSteps(steps: Int) {
-        val current = zoomedFontSize ?: baseFontSize
-        val next = (current.value + steps).coerceIn(fontSizeRangeSp).sp
-        if (next != current) zoomedFontSize = next
-    }
+    /** The font size the terminal shows. */
+    internal val fontSize: TextUnit
+        get() = zoomedFontSize ?: baseFontSize
+
+    /** The font size [steps] sp away from [fontSize], kept in [fontSizeRangeSp]. */
+    internal fun fontSizeAfter(steps: Int): TextUnit = (fontSize.value + steps).coerceIn(fontSizeRangeSp).sp
 
     /** Types [text] as if typed on a keyboard, with the [stickyModifiers]. */
     public fun sendText(text: String) {

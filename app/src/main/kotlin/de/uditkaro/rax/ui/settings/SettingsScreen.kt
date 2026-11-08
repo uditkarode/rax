@@ -35,6 +35,7 @@ fun SettingsScreen(graph: AppGraph, system: SystemActions, onBack: (() -> Unit)?
 
     val hosts by graph.connections.hosts.collectAsStateWithLifecycle()
     val tailnet by graph.tailnet.status.collectAsStateWithLifecycle()
+    val backgroundAlerts by graph.backgroundAlerts.collectAsStateWithLifecycle()
     val mono = rememberTerminalFontFamily(graph, s.fontId)
 
     LargeTitleScreen(stringResource(R.string.settings_title), onBack) {
@@ -77,12 +78,10 @@ fun SettingsScreen(graph: AppGraph, system: SystemActions, onBack: (() -> Unit)?
                     )
                 }
                 row {
-                    ToggleRow(stringResource(R.string.settings_background_alerts), s.backgroundAlerts, { on ->
-                        if (on) {
-                            system.askNotifications { granted -> if (granted) graph.updateSettings { setBackgroundAlerts(true) } }
-                        } else {
-                            graph.updateSettings { setBackgroundAlerts(false) }
-                        }
+                    // On only while Rax may also post notifications, so turning it on asks for that.
+                    ToggleRow(stringResource(R.string.settings_background_alerts), backgroundAlerts == true, { on ->
+                        graph.updateSettings { setBackgroundAlerts(on) }
+                        if (on) system.askNotifications()
                     })
                 }
             }

@@ -68,6 +68,15 @@ class StatusJsonTest {
     }
 
     @Test
+    fun loggingRequired() {
+        assertEquals(
+            TailnetStatus.Error("tailnet requires logging", loggingRequired = true),
+            parseStatus("""{"state":"Stopped","error":"tailnet requires logging","loggingRequired":true}""").status,
+        )
+        assertEquals(TailnetStatus.Error("boom"), parseStatus("""{"state":"Starting","error":"boom"}""").status)
+    }
+
+    @Test
     fun peersOnlyWhileRunning() {
         val state = parseStatus("""{"state":"Starting","peers":[{"dnsName":"a.t.ts.net"}]}""")
         assertEquals(emptyList<TailnetPeer>(), state.peers)

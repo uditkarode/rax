@@ -9,8 +9,12 @@ and without a `VpnService`.
 - `go/` is a Go module (package `libtailnet`) that wraps `tsnet`. gomobile binds it
   to Java as `de.uditkaro.rax.tailnet.libtailnet`. Only the Kotlin wrapper calls it.
 - `src/main/kotlin/` is the Kotlin API:
-  - `Tailnet.get(context)`: the node of this process.
-  - `start()`, `login()`, `logout()`, `stop()`: suspend functions.
+  - `Tailnet.get(context)`: the node of this process. The first call must come
+    before the app starts other threads, see below.
+  - `start()`, `retry()`, `login()`, `logout()`, `stop()`: suspend functions.
+    `retry()` starts the node again if it is in `Error`, which it does not
+    leave by itself. A `logout()` that cannot reach Tailscale throws, and the
+    node keeps its keys and stays signed in.
   - `status: StateFlow<TailnetStatus>`: `Stopped`, `Starting`, `NeedsLogin(authUrl)`,
     `NeedsApproval`, `Running(tailnetName, dnsName, addresses)`, `Error(message)`.
   - `peers: StateFlow<List<TailnetPeer>>`: MagicDNS name, host name, OS, online state
@@ -48,6 +52,12 @@ and without a `VpnService`.
 - Apps have no `HOME` and no writable temp directory, and Tailscale code that
   looks for a log directory panics without one. `TS_LOGS_DIR` and `HOME` are set
   to the state directory.
+- Environment: a gomobile library starts with an empty Go environment, so Go
+  sets its variables itself (`TS_LOGS_DIR`, `HOME`, `TS_NO_LOGS_NO_SUPPORT`,
+  `SSL_CERT_DIR`), and each of those calls also sets the C environment. Adding a
+  C variable can move the environment array while another thread reads it, so
+  `Tailnet.get` creates all of them first, and Go's calls then only replace
+  values. `AppGraph` makes the `Tailnet` before anything that starts a thread.
 - Logging goes to logcat with tag `RaxTailnet`. By default only INFO and above
   appear, which is a few lines per start and stop. For the node's full log:
 

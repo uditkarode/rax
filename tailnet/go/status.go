@@ -10,14 +10,16 @@ import (
 )
 
 // statusJSON is the status sent to Kotlin. State is an ipn.State name.
-// Self and Peers are set only in state Running.
+// Self and Peers are set only in state Running. LoggingRequired is set when
+// Error says that the tailnet requires network flow logs.
 type statusJSON struct {
-	State   string     `json:"state"`
-	AuthURL string     `json:"authURL,omitempty"`
-	Error   string     `json:"error,omitempty"`
-	Tailnet string     `json:"tailnet,omitempty"`
-	Self    *peerJSON  `json:"self,omitempty"`
-	Peers   []peerJSON `json:"peers,omitempty"`
+	State           string     `json:"state"`
+	AuthURL         string     `json:"authURL,omitempty"`
+	Error           string     `json:"error,omitempty"`
+	LoggingRequired bool       `json:"loggingRequired,omitempty"`
+	Tailnet         string     `json:"tailnet,omitempty"`
+	Self            *peerJSON  `json:"self,omitempty"`
+	Peers           []peerJSON `json:"peers,omitempty"`
 }
 
 type peerJSON struct {
@@ -28,11 +30,15 @@ type peerJSON struct {
 	IPs      []string `json:"ips"`
 }
 
-func buildStatus(st *ipnstate.Status, errMsg string) statusJSON {
+func buildStatus(st *ipnstate.Status, errMsg, loggingErr string) statusJSON {
 	s := statusJSON{
 		State:   st.BackendState,
 		AuthURL: st.AuthURL,
 		Error:   errMsg,
+	}
+	if loggingErr != "" {
+		s.Error = loggingErr
+		s.LoggingRequired = true
 	}
 	if st.CurrentTailnet != nil {
 		s.Tailnet = st.CurrentTailnet.Name

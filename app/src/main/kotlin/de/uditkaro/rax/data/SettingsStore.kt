@@ -7,7 +7,6 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -21,8 +20,6 @@ data class Settings(
     val fontId: String = DEFAULT_FONT,
     val fontSize: Float = DEFAULT_FONT_SIZE,
     val backgroundAlerts: Boolean = false,
-    /** Permissions Rax has asked for at least once. Once Android stops asking, Rax sends the user to system settings. */
-    val askedPermissions: Set<String> = emptySet(),
 ) {
     companion object {
         const val DEFAULT_FONT = "paper-mono"
@@ -43,7 +40,6 @@ class SettingsStore(context: Context) {
         val font = stringPreferencesKey("font")
         val fontSize = floatPreferencesKey("font_size")
         val backgroundAlerts = booleanPreferencesKey("background_alerts")
-        val askedPermissions = stringSetPreferencesKey("asked_permissions")
     }
 
     val settings: Flow<Settings> = data.data.map { p ->
@@ -56,7 +52,6 @@ class SettingsStore(context: Context) {
             fontSize = (p[Keys.fontSize] ?: Settings.DEFAULT_FONT_SIZE)
                 .coerceIn(Settings.FONT_SIZES.start, Settings.FONT_SIZES.endInclusive),
             backgroundAlerts = p[Keys.backgroundAlerts] ?: false,
-            askedPermissions = p[Keys.askedPermissions].orEmpty(),
         )
     }
 
@@ -72,5 +67,4 @@ class SettingsStore(context: Context) {
     }
 
     suspend fun setBackgroundAlerts(on: Boolean) = data.edit { it[Keys.backgroundAlerts] = on }
-    suspend fun setAsked(permission: String) = data.edit { it[Keys.askedPermissions] = it[Keys.askedPermissions].orEmpty() + permission }
 }

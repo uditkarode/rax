@@ -147,6 +147,7 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
                 ImportResult.Reason.NotAFont -> stringResource(R.string.font_error_not_font)
                 ImportResult.Reason.NotMonospaced -> stringResource(R.string.font_error_proportional)
                 ImportResult.Reason.Unreadable -> stringResource(R.string.font_error_unreadable)
+                ImportResult.Reason.NotSaved -> stringResource(R.string.font_error_not_saved)
                 null -> null
             }
             if (message != null) {

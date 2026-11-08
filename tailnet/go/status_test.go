@@ -32,7 +32,7 @@ func TestBuildStatus(t *testing.T) {
 			key.NewNode().Public(): peer("", true),
 		},
 	}
-	got := buildStatus(st, "")
+	got := buildStatus(st, "", "")
 	want := statusJSON{
 		State:   "Running",
 		Tailnet: "user@example.com",
@@ -53,8 +53,17 @@ func TestBuildStatusNotRunning(t *testing.T) {
 		AuthURL:      "https://login.tailscale.com/a/1",
 		Self:         &ipnstate.PeerStatus{DNSName: "x."},
 	}
-	got := buildStatus(st, "boom")
+	got := buildStatus(st, "boom", "")
 	want := statusJSON{State: "NeedsLogin", AuthURL: "https://login.tailscale.com/a/1", Error: "boom"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestBuildStatusLoggingRequired(t *testing.T) {
+	st := &ipnstate.Status{BackendState: "Stopped"}
+	got := buildStatus(st, "other", "tailnet requires logging")
+	want := statusJSON{State: "Stopped", Error: "tailnet requires logging", LoggingRequired: true}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}

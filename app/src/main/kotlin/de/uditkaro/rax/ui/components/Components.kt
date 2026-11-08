@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -202,10 +203,10 @@ fun NavRow(
 
 @Composable
 fun ToggleRow(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    // The row carries the on or off state for screen readers, so the switch takes no input itself.
     RowBase(
-        onClick = { onCheckedChange(!checked) },
-        modifier = modifier,
-        role = Role.Switch,
+        onClick = null,
+        modifier = modifier.toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange),
         contentPadding = PaddingValues(start = Metrics.rowPadding, end = 12.dp, top = 6.dp, bottom = 6.dp),
     ) {
         Text(title, Modifier.weight(1f), style = RaxType.body, color = Rax.colors.text)

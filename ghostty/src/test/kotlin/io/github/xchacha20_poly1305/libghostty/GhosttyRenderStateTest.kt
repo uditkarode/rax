@@ -131,6 +131,24 @@ class GhosttyRenderStateTest {
     }
 
     @Test
+    fun defaultColorChangeRedrawsEveryRow() {
+        write("first\r\nsecond")
+        val state = GhosttyRenderState()
+        update(state)
+        write("\u001b]11;#ffffff\u0007")
+        assertTrue(update(state))
+        assertEquals(0xFFFFFFFF.toInt(), state.defaultBackground)
+        assertEquals(state.defaultBackground, state.background(0, 0))
+        write("\u001b]10;#102030\u0007")
+        assertTrue(update(state))
+        assertEquals(0xFF102030.toInt(), state.foreground(0, 0))
+        write("\u001b]111\u0007")
+        assertTrue(update(state))
+        assertEquals(state.defaultBackground, state.background(0, 1))
+        assertEquals(0xFF000000.toInt(), state.defaultBackground)
+    }
+
+    @Test
     fun themeColorsReachTheState() {
         val state = GhosttyRenderState()
         update(state)

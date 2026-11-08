@@ -39,6 +39,7 @@
     <string name="tailscale_signed_out">Signed out</string>
     <string name="tailscale_starting">Starting…</string>
     <string name="tailscale_sign_in">Sign in to Tailscale</string>
+    <string name="tailscale_no_browser">No app on this phone can open the sign-in page. Rax copied its link.</string>
     <string name="tailscale_about">Rax joins your tailnet as a device of its own. Only Rax uses it, so the phone needs no VPN.</string>
     <string name="tailscale_waiting_approval">Waiting for approval</string>
     <string name="tailscale_approval_footnote">An admin of your tailnet must approve this phone in the Tailscale admin console.</string>
@@ -52,6 +53,8 @@
     <string name="tailscale_sign_out">Sign out</string>
     <string name="tailscale_sign_out_title">Sign out of Tailscale?</string>
     <string name="tailscale_sign_out_body">Rax leaves your tailnet, and hosts that go through Tailscale stop working until you sign in again.</string>
+    <string name="tailscale_sign_out_failed">Couldn’t sign out of Tailscale. Try again when the phone is online.</string>
+    <string name="tailscale_logging_required">Your tailnet requires network flow logs, and Rax sends no logs to Tailscale. Ask an admin of your tailnet to turn off network flow logs, or sign in with another account.</string>
     <string name="host_menu">More for %1$s</string>
     <string name="host_edit">Edit host</string>
     <string name="session_new">New session</string>
@@ -113,6 +116,8 @@
     <string name="action_close_tab">Close tab</string>
     <string name="action_rename_session">Rename session</string>
     <string name="action_end_session">End session</string>
+    <string name="action_failed_offline">Couldn’t reach the computer.</string>
+    <string name="action_failed">Rex couldn’t do that.</string>
     <string name="confirm_close_pane">Close %1$s?</string>
     <string name="confirm_close_body">The program running in it stops.</string>
     <string name="confirm_close_tab">Close %1$s?</string>
@@ -132,6 +137,7 @@
     <string name="host_summary_tailnet">Connects to %1$s through Tailscale.</string>
     <string name="host_invalid_scheme">Use an address such as 192.168.1.20:7297 or a URL that starts with http, https, ws or wss.</string>
     <string name="host_invalid_address">That is not an address Rax can connect to.</string>
+    <string name="host_invalid_short_tailnet">Use the full name that ends in .ts.net, or add the port.</string>
     <string name="host_delete">Delete host</string>
     <string name="host_delete_title">Delete %1$s?</string>
     <string name="host_delete_body">Rax forgets this computer. Its sessions keep running in Rex.</string>
@@ -169,6 +175,7 @@
     <string name="font_error_not_font">That file is not a font.</string>
     <string name="font_error_proportional">That font is not monospaced, so its letters cannot line up in a terminal.</string>
     <string name="font_error_unreadable">That file could not be read.</string>
+    <string name="font_error_not_saved">The font could not be saved on this phone.</string>
 
     <string name="acknowledgements_title">Acknowledgements</string>
     <string name="acknowledgements_themes">Themes</string>

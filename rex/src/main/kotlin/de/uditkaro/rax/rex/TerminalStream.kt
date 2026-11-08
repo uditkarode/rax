@@ -4,7 +4,9 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Base64
+import java.util.concurrent.Semaphore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -41,7 +43,8 @@ class TerminalStream(
         data class Loading(val bytes: Long) : Event
         /** A new stream began. Rebuild the emulator from [snapshot] (null: start blank). */
         class Started(val snapshot: ByteArray?) : Event
-        class Output(val bytes: ByteArray) : Event
+        /** Program output. [receivedAt] is when it arrived, on the [System.nanoTime] clock. */
+        class Output(val bytes: ByteArray, val receivedAt: Long) : Event
         data class Resize(val columns: Int, val rows: Int, val owner: String?) : Event
         data class Exited(val code: Int) : Event
         /** The connection is down and being retried; what is on screen stays. */
@@ -81,19 +84,20 @@ class TerminalStream(
                     send(Event.Closed)
                     return@channelFlow
                 }
-                val value = ticket.getOrNull()
-                if (value == null) {
+                val value = ticket.getOrNull()?.let { runCatching { Base64.getUrlDecoder().decode(it) }.getOrNull() }
+                if (value == null || value.size != TICKET_BYTES) {
                     // Usually the session is not attached yet on a fresh connection.
                     delay(backoff(failures++))
                     continue
                 }
-                ByteArray(17).also { b ->
-                    b[0] = 0x01
-                    Base64.getUrlDecoder().decode(value).copyInto(b, 1)
-                }
+                byteArrayOf(0x01) + value
             }
 
+            // OkHttp's reader thread waits while INBOX_BYTES are unread, so a terminal that falls far
+            // behind slows the socket down and output does not pile up in memory. That thread also reads
+            // the pongs that keep the socket open, so the budget is large enough for a slow restore.
             val inbox = Channel<Incoming>(Channel.UNLIMITED)
+            val unread = Semaphore(INBOX_BYTES)
             val ws = host.httpClient.newWebSocket(
                 Request.Builder().url(host.endpoint.dataUrl).header("Sec-WebSocket-Protocol", SUBPROTOCOL).build(),
                 object : WebSocketListener() {
@@ -102,7 +106,9 @@ class TerminalStream(
                     }
 
                     override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                        inbox.trySend(Incoming.Bytes(bytes.toByteArray()))
+                        val receivedAt = System.nanoTime()
+                        unread.acquireUninterruptibly(budget(bytes.size))
+                        inbox.trySend(Incoming.Bytes(bytes.toByteArray(), receivedAt))
                     }
 
                     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -168,6 +174,7 @@ class TerminalStream(
                 for (m in inbox) {
                     when (m) {
                         is Incoming.Bytes -> {
+                            unread.release(budget(m.bytes.size))
                             received += m.bytes.size
                             val parts = p.feed(m.bytes)
                             if (!started && parts.isEmpty()) send(Event.Loading(received))
@@ -176,7 +183,7 @@ class TerminalStream(
                                 send(
                                     when (part) {
                                         is StreamPart.Snapshot -> Event.Started(part.bytes)
-                                        is StreamPart.Output -> Event.Output(part.bytes)
+                                        is StreamPart.Output -> Event.Output(part.bytes, m.receivedAt)
                                         is StreamPart.Resize -> Event.Resize(part.columns, part.rows, part.owner)
                                         is StreamPart.Exited -> Event.Exited(part.code)
                                     },
@@ -185,6 +192,11 @@ class TerminalStream(
                         }
                         is Incoming.Closed -> {
                             ended = m.code == BLOCK_CLOSED || m.code == 1000
+                            if (m.code == RECONNECT_REQUIRED) {
+                                // Rex no longer has the stream, so a RESUME would only be refused.
+                                resume = null
+                                parser = null
+                            }
                             break
                         }
                     }
@@ -199,43 +211,63 @@ class TerminalStream(
                 // A close frame ends the stream on Rex, so the next HELLO for this pane is not refused
                 // as a second connection. A socket that already failed has nothing to close.
                 if (!ws.close(1000, null)) ws.cancel()
+                // Frees the reader thread if it waits for room that nothing makes now.
+                inbox.cancel()
+                unread.release(INBOX_BYTES)
             }
         }
         awaitClose()
     }
 
     private sealed interface Incoming {
-        class Bytes(val bytes: ByteArray) : Incoming
+        class Bytes(val bytes: ByteArray, val receivedAt: Long) : Incoming
         data class Closed(val code: Int) : Incoming
     }
+
+    /** What a message of [size] bytes takes from the inbox's budget; a larger message takes all of it. */
+    private fun budget(size: Int): Int = minOf(size, INBOX_BYTES)
 
     private fun backoff(failures: Int): Long = minOf(10_000L, 300L shl minOf(failures, 5))
 
     companion object {
         const val SUBPROTOCOL = "rex.data.terminal.v1"
         private const val BLOCK_CLOSED = 4000
+        private const val RECONNECT_REQUIRED = 1013
+        private const val TICKET_BYTES = 16
         private const val HANDSHAKE_TIMEOUT_MS = 10_000L
         private const val REJECTS_BEFORE_INTERRUPTED = 3
         private const val REJECT_ALREADY_CONNECTED: Byte = 0x02
         private const val QUICK_RETRIES = 20
         private const val QUICK_RETRY_MS = 250L
+        /** Unread output a stream holds before it stops reading the socket. */
+        private const val INBOX_BYTES = 16 * 1024 * 1024
     }
 }
 
 /**
  * Typing and sizing for one pane. Writes go in order, one in flight at a time, with whatever was
  * typed meanwhile joined into the next one. Sizes go one at a time too, and only the latest waiting
- * size is sent, so a burst of sizes while the keyboard slides in ends on the last one.
+ * size is sent, so a burst of sizes while the keyboard slides in ends on the last one. The writes of
+ * [before], the pane's input until now, go out before the writes of this one.
  */
-class PaneInput(private val host: RexHost, private val sessionId: String, private val blockId: String, scope: CoroutineScope) {
+class PaneInput(
+    private val host: RexHost,
+    private val sessionId: String,
+    private val blockId: String,
+    scope: CoroutineScope,
+    before: PaneInput? = null,
+) {
     private val queue = Channel<ByteArray>(Channel.UNLIMITED)
     private val sizes = Channel<Size>(Channel.CONFLATED)
     private val themes = Channel<PaneTheme>(Channel.CONFLATED)
+    private val writes: Job
+    private val settings: List<Job>
 
     private data class Size(val columns: Int, val rows: Int, val cellWidth: Int, val cellHeight: Int)
 
     init {
-        scope.launch {
+        writes = scope.launch {
+            before?.writes?.join()
             val batch = ByteArrayOutputStream()
             for (first in queue) {
                 batch.reset()
@@ -243,15 +275,19 @@ class PaneInput(private val host: RexHost, private val sessionId: String, privat
                 while (true) batch.write(queue.tryReceive().getOrNull() ?: break)
                 val text = batch.toByteArray().decodeToString()
                 // Keys typed while the connection is down wait a little for it to come back.
-                withTimeoutOrNull(15_000) { host.client.state.first { it is RexClient.State.Connected } } ?: continue
-                runCatching {
-                    host.client.callBlock(sessionId, blockId, "write", buildJsonObject { put("data", text) })
+                val st = withTimeoutOrNull(15_000) { ready() } ?: continue
+                for (part in writeParts(text, (st.link as RexClient.State.Connected).welcome.maxMessageBytes - REQUEST_MARGIN)) {
+                    val sent = runCatching {
+                        host.client.callBlock(sessionId, blockId, "write", buildJsonObject { put("data", part) })
+                    }
+                    // The rest of a paste without the part before it would be garbled.
+                    if (sent.isFailure) break
                 }
             }
         }
-        scope.launch {
+        val sizing = scope.launch {
             for (size in sizes) {
-                host.client.state.first { it is RexClient.State.Connected }
+                ready()
                 runCatching {
                     host.client.callBlock(sessionId, blockId, "resize", buildJsonObject {
                         put("columns", size.columns)
@@ -262,9 +298,9 @@ class PaneInput(private val host: RexHost, private val sessionId: String, privat
                 }
             }
         }
-        scope.launch {
+        val theming = scope.launch {
             for (theme in themes) {
-                host.client.state.first { it is RexClient.State.Connected }
+                ready()
                 runCatching {
                     host.client.callBlock(sessionId, blockId, "set_theme", buildJsonObject {
                         put("foreground", theme.foreground)
@@ -276,7 +312,11 @@ class PaneInput(private val host: RexHost, private val sessionId: String, privat
                 }
             }
         }
+        settings = listOf(sizing, theming)
     }
+
+    /** Waits for a connection that has attached the session, because Rex refuses calls that name it before that. */
+    private suspend fun ready(): HostState = host.state.first { it.canCall(sessionId) }
 
     fun send(bytes: ByteArray) {
         if (bytes.isNotEmpty()) queue.trySend(bytes)
@@ -295,11 +335,50 @@ class PaneInput(private val host: RexHost, private val sessionId: String, privat
         themes.trySend(theme)
     }
 
+    /** Takes no more input. What was typed still goes out; a size or colours not sent yet are dropped. */
     fun close() {
         queue.close()
-        sizes.close()
-        themes.close()
+        settings.forEach { it.cancel() }
     }
+}
+
+/** Room in a request for everything but the written text: the envelope, the method and the IDs. */
+private const val REQUEST_MARGIN = 4096
+
+/**
+ * Splits [text] into parts whose JSON string form takes at most [maxBytes] bytes of UTF-8, so a
+ * large paste fits Rex's message limit. Parts end on code point boundaries.
+ */
+private fun writeParts(text: String, maxBytes: Int): List<String> {
+    val parts = ArrayList<String>(1)
+    var start = 0
+    var size = 0
+    var i = 0
+    while (i < text.length) {
+        val cp = text.codePointAt(i)
+        val n = Character.charCount(cp)
+        val bytes = jsonBytes(cp)
+        if (size + bytes > maxBytes && i > start) {
+            parts += text.substring(start, i)
+            start = i
+            size = 0
+        }
+        size += bytes
+        i += n
+    }
+    if (start < text.length) parts += text.substring(start)
+    return parts
+}
+
+/** How many bytes [cp] takes inside a JSON string: escaped controls and quotes, and UTF-8 for the rest. */
+private fun jsonBytes(cp: Int): Int = when {
+    cp == '"'.code || cp == '\\'.code -> 2
+    cp == '\b'.code || cp == '\t'.code || cp == '\n'.code || cp == 0x0c || cp == '\r'.code -> 2
+    cp < 0x20 -> 6
+    cp < 0x80 -> 1
+    cp < 0x800 -> 2
+    cp < 0x10000 -> 3
+    else -> 4
 }
 
 /** A pane's default colours as `#rrggbb`, with the 256-colour palette in index order. */

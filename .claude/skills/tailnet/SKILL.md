@@ -28,14 +28,23 @@ Consequences:
 
 ## Lifecycle
 
-- `AppGraph` starts the node when any saved host uses the tailnet. Signing in from Settings starts
-  it too.
+- `TailnetKeeper` (in `AppGraph`) runs the node while a saved host uses the tailnet and
+  `Connections` is in use (foreground, or background alerts on), and while something holds it: the
+  Tailscale screen while it is on screen, and a sign-in until the node leaves `NeedsLogin`. It
+  stops the node 60 seconds after the last need goes, longer than the grace period in
+  `Connections`. A sign-in must hold the node: the browser sends Rax to the background, and the
+  new node key is only in memory until the login finishes.
 - A tailnet host connects only while the node is Running. While the node is down every attempt
   fails at once, and those failures would make the host look unreachable after the node comes up.
   So whenever the node's state changes, `Connections` stops each tailnet host that is not
   connected, and starts it again from its first attempt once the node runs. A connected host is
   left alone, because its connection can outlast a short drop of the node.
-- Retry on a tailnet host, on Home or in a pane, starts the node again before it reconnects.
+- Retry on a tailnet host, on Home, in a pane or on the Tailscale screen, calls `Tailnet.retry()`,
+  which restarts the node if it is in `Error`. An error lasts until the backend moves on (a new
+  state, a login URL or a finished login), except that a tailnet that requires network flow logs
+  stays an error (`loggingRequired`) until the node runs again or signs out.
+- A sign-out that cannot reach Tailscale puts the node back with its keys, so it stays signed in,
+  and the app says that the sign-out failed.
 - Sign-in: when the node needs a login, its status carries the auth URL, and Rax opens it in a
   Custom Tab (`rememberTailnetSignIn`). Keys live in `noBackupFilesDir/tailnet`, so a backup
   restored on another phone does not clone this device.
@@ -49,14 +58,20 @@ Consequences:
 - `http://<peer>:7297/api/control`, for a computer that runs Tailscale itself and starts Rex with
   `--extra-listen :7297`.
 
-A control endpoint answers a plain GET with HTTP 426 (Upgrade Required), and that is the test. The
-name Rax shows drops a `-rex` suffix or `rex-` prefix, because Rex names its device `<name>-rex` by
-default.
+A control endpoint answers a plain GET with HTTP 426 (Upgrade Required), and that is the test. A
+Rex that does not let this Tailscale account in answers 403 with a JSON `{"error": ...}` (server
+doc, not probed); it is listed with that reason and opens nothing. Each computer is probed once,
+and again after it was offline, and leaving the screen cancels the probes. The name Rax shows drops
+a `-rex` suffix or `rex-` prefix, because Rex names its device `<name>-rex` by default.
 
 ## Privacy
 
 `TS_NO_LOGS_NO_SUPPORT` is set and `logtail` is disabled, so the node uploads no logs to
 Tailscale's log service. Its log goes to logcat only (tag `RaxTailnet`).
+
+A tailnet with network flow logs on needs that upload, so Tailscale stops the node there. Rax keeps
+its policy and says so on the Tailscale screen (`TailnetStatus.Error.loggingRequired`, detected by
+the backend's message in `go/node.go`).
 
 ## Build traps
 

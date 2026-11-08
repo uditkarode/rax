@@ -11,7 +11,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
- * Threading: [feedOutput] and [finish] may be called from any thread. All other methods and
+ * Threading: [feedOutput] and [finish] may be called from any thread. Until a host first shows the session, [resize]
+ * and the [transport] setter may also be called off the main thread, from one thread at a time. All other methods and
  * property writes must happen on the main thread. State flows, [EventListener] and [GhosttyTerminalHost] methods
  * are called on the main thread, except [exitStatus], which is updated on the thread that calls [finish].
  * [Transport] methods may be called from any thread that calls [feedOutput], and from the main thread;
@@ -39,6 +40,13 @@ public class GhosttyTerminalSession private constructor(
          * emoji and combining sequences take their Unicode width. Programs can still toggle the mode.
          */
         public val defaultGraphemeCluster: Boolean = false,
+        /**
+         * Whether the terminal itself writes to the program: replies to its queries, answers to its clipboard
+         * reads, and the focus, color scheme and size reports it subscribes to. Turn it off when the program's own
+         * terminal runs elsewhere and does this already, as for a session that mirrors a remote terminal. Clipboard
+         * reads are then denied without asking, and only what the user types reaches the [Transport].
+         */
+        public val repliesToProgram: Boolean = true,
     ) {
         init {
             require(columns >= 1) { "columns must be >= 1" }
@@ -62,6 +70,7 @@ public class GhosttyTerminalSession private constructor(
     }
 
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val repliesToProgram = options.repliesToProgram
 
     private val terminalAccess = Any()
     private val outputDispatchPending = AtomicBoolean(false)
@@ -109,7 +118,8 @@ public class GhosttyTerminalSession private constructor(
 
     /**
      * The clipboard programs write with OSC 52 and, once the user approves through the [GhosttyTerminalHost], read.
-     * Without one, clipboard writes are dropped and reads answer an empty clipboard.
+     * Writes apply only while a [host] shows the session and [GhosttyTerminalHost.isVisible] is true. Without a
+     * clipboard, writes are dropped and reads answer an empty clipboard.
      */
     @Volatile
     public var clipboard: GhosttyClipboard? = null
@@ -172,6 +182,9 @@ public class GhosttyTerminalSession private constructor(
     private var sentCellHeightPixels = 0
     private var resizeSend: Job? = null
 
+    /** The in-band size report (mode 2048) for the size not yet sent to the transport. */
+    private var sizeReport: ByteArray? = null
+
     init {
         backgroundColor.value = withHandle { GhosttyVt.nativeGetBackgroundColor(it) }
             ?.takeIf { it != 0 }
@@ -188,25 +201,32 @@ public class GhosttyTerminalSession private constructor(
     }
 
     public fun feedOutput(data: ByteArray, offset: Int = 0, length: Int = data.size) {
-        val response = withHandle { GhosttyVt.nativeWrite(it, data, offset, length) }
-        if (response != null && response.isNotEmpty()) {
-            // timg abandons its kitty graphics probe when the DA1 reply does not
-            // arrive within a small time budget.
-            sendRawInput(response)
-        }
+        // The terminal stays locked while it parses, so a long run is parsed in parts and the main thread can draw
+        // between them.
+        val end = offset + length
+        var start = offset
+        do {
+            val count = minOf(FEED_CHUNK_BYTES, end - start)
+            val response = withHandle { GhosttyVt.nativeWrite(it, data, start, count) }
+            if (repliesToProgram && response != null && response.isNotEmpty()) {
+                // timg abandons its kitty graphics probe when the DA1 reply does not
+                // arrive within a small time budget.
+                sendRawInput(response)
+            }
+            start += count
+        } while (start < end)
         scheduleOutputDispatch()
     }
 
+    // One drain per main thread message, so frames and input run between drains while output keeps coming.
     private fun scheduleOutputDispatch() {
         outputDispatchPending.set(true)
         if (!outputDispatchScheduled.compareAndSet(false, true)) return
         mainScope.launch {
             try {
-                do {
-                    outputDispatchPending.set(false)
-                    withHandle { drainEvents(it) }
-                    host?.onTerminalChanged()
-                } while (outputDispatchPending.get())
+                outputDispatchPending.set(false)
+                withHandle { drainEvents(it) }
+                host?.onTerminalChanged()
             } finally {
                 outputDispatchScheduled.set(false)
                 if (outputDispatchPending.get()) scheduleOutputDispatch()
@@ -226,7 +246,7 @@ public class GhosttyTerminalSession private constructor(
         }
         if (flags and GhosttyVt.EVENT_CLIPBOARD != 0) {
             val text = GhosttyVt.nativeTakeClipboard(handle)?.toString(Charsets.UTF_8)
-            if (!text.isNullOrEmpty()) {
+            if (!text.isNullOrEmpty() && host?.isVisible == true) {
                 try {
                     clipboard?.setText(text)
                 } catch (e: Exception) {
@@ -269,10 +289,10 @@ public class GhosttyTerminalSession private constructor(
 
     public fun setColorScheme(dark: Boolean) {
         val report = withHandle { GhosttyVt.nativeSetColorScheme(it, dark) }
-        if (report != null && report.isNotEmpty()) sendRawInput(report)
+        if (repliesToProgram && report != null && report.isNotEmpty()) sendRawInput(report)
     }
 
-    internal fun clipboardHasText(): Boolean = try {
+    internal fun clipboardHasText(): Boolean = if (!repliesToProgram) false else try {
         clipboard?.hasText() ?: false
     } catch (e: Exception) {
         logError(TAG, "clipboard query failed", e)
@@ -280,6 +300,7 @@ public class GhosttyTerminalSession private constructor(
     }
 
     internal fun readClipboardForProgram(granted: Boolean): ByteArray? {
+        if (!repliesToProgram) return null
         val clipboard = clipboard ?: return null
         if (!granted && !clipboardReadApproved) {
             if (clipboardReadPromptPending.compareAndSet(false, true)) {
@@ -306,7 +327,7 @@ public class GhosttyTerminalSession private constructor(
     }
 
     public fun sendFocus(gained: Boolean) {
-        if (isFinished) return
+        if (isFinished || !repliesToProgram) return
         val report = withHandle { GhosttyVt.nativeEncodeFocus(it, gained) }
         if (report != null && report.isNotEmpty()) sendRawInput(report)
     }
@@ -328,7 +349,7 @@ public class GhosttyTerminalSession private constructor(
     public fun screenText(): String? = withHandle { GhosttyVt.nativeViewportText(it) }
         ?.toString(Charsets.UTF_8)
 
-    public fun selectionText(): String? = withHandle { GhosttyVt.nativeSelectionText(it) }
+    public fun selectionText(): String? = withHandle { GhosttyVt.nativeSelectionText(it, -1) }
         ?.toString(Charsets.UTF_8)
 
     public fun transcriptText(): String? = withHandle { GhosttyVt.nativeTranscriptText(it) }
@@ -352,7 +373,8 @@ public class GhosttyTerminalSession private constructor(
         this.rows = rows
         this.cellWidthPixels = cellWidthPixels
         this.cellHeightPixels = cellHeightPixels
-        withHandle { GhosttyVt.nativeResize(it, columns, rows, cellWidthPixels, cellHeightPixels) }
+        val report = withHandle { GhosttyVt.nativeResize(it, columns, rows, cellWidthPixels, cellHeightPixels) }
+        sizeReport = report?.takeIf { repliesToProgram && it.isNotEmpty() }
     }
 
     private fun scheduleTransportResize() {
@@ -380,6 +402,8 @@ public class GhosttyTerminalSession private constructor(
             && cellWidthPixels == sentCellWidthPixels
             && cellHeightPixels == sentCellHeightPixels
         ) {
+            // The program already has this size.
+            sizeReport = null
             return
         }
         sentColumns = columns
@@ -392,6 +416,9 @@ public class GhosttyTerminalSession private constructor(
             logError(TAG, "transport send resize failed", e)
             if (!isFinished) finish(-1)
         }
+        val report = sizeReport ?: return
+        sizeReport = null
+        sendRawInput(report)
     }
 
     public fun setTheme(theme: GhosttyTheme) {
@@ -479,8 +506,8 @@ public class GhosttyTerminalSession private constructor(
         /**
          * Restores a session from a libghostty-vt snapshot (`GHOSTSNP`). The snapshot sets the size, both screens,
          * the scrollback and its limits, the colors, the modes and the cursor defaults; of [options], only
-         * [Options.reportedVersion] and [Options.terminfoName] apply. Returns null when this build cannot read the
-         * snapshot, for example because the encoder used a newer snapshot format.
+         * [Options.reportedVersion], [Options.terminfoName] and [Options.repliesToProgram] apply. Returns null when
+         * this build cannot read the snapshot, for example because the encoder used a newer snapshot format.
          *
          * May be called from any thread, like [feedOutput].
          */
@@ -495,6 +522,7 @@ public class GhosttyTerminalSession private constructor(
             return session
         }
         private val RESIZE_SEND_DEBOUNCE = 100.milliseconds
+        private const val FEED_CHUNK_BYTES = 64 * 1024
 
         /** OSC 7 reports a `file://host/path` URL; anything else is shown as is. */
         private fun pwdToPath(raw: String): String? {

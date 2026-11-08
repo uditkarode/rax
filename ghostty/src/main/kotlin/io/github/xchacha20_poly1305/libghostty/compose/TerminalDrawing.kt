@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -25,38 +26,93 @@ internal object SelectionHandles {
     val radius = 11.dp
     val hitSlop = 24.dp
 
-    /** The point a handle's stem touches: the bottom corner of the first or last selected cell. */
-    fun anchors(controller: TerminalController): Pair<Offset, Offset>? {
-        val glyphs = controller.glyphs ?: return null
-        val (first, last) = controller.selectionBounds() ?: return null
+    /**
+     * The points the handles' stems touch: the bottom corners of the first and the last selected cell. The handle of
+     * a cell outside the viewport is null.
+     */
+    fun anchors(controller: TerminalController): Pair<Offset?, Offset?> {
+        val glyphs = controller.glyphs ?: return null to null
+        val (first, last) = controller.selectionEnds ?: return null to null
         val origin = controller.gridOrigin
-        return origin + Offset(first.column * glyphs.cellWidth, (first.row + 1f) * glyphs.cellHeight) to
-                origin + Offset((last.column + 1) * glyphs.cellWidth, (last.row + 1f) * glyphs.cellHeight)
+        val rows = 0 until controller.render.rows
+        val start = if (first.row in rows) {
+            origin + Offset(first.column * glyphs.cellWidth, (first.row + 1f) * glyphs.cellHeight)
+        } else {
+            null
+        }
+        val end = if (last.row in rows) {
+            origin + Offset((last.column + 1) * glyphs.cellWidth, (last.row + 1f) * glyphs.cellHeight)
+        } else {
+            null
+        }
+        return start to end
     }
 }
 
-internal fun DrawScope.drawTerminal(controller: TerminalController, handleColor: Color, showHandles: Boolean) {
+/** The grid: cell backgrounds, images and text. */
+internal fun DrawScope.drawTerminal(controller: TerminalController) {
     val glyphs = controller.glyphs ?: return
     val render = controller.render
-    val background = Color(render.defaultBackground)
-    drawRect(background)
+    drawRect(Color(render.defaultBackground))
     if (render.columns == 0 || render.rows == 0) return
 
     val cellWidth = glyphs.cellWidth
     val cellHeight = glyphs.cellHeight.toFloat()
-    val origin = controller.gridOrigin
-    translate(origin.x, origin.y) {
-        clipRect(right = render.columns * cellWidth, bottom = render.rows * cellHeight) {
+    pinchScaled(controller) {
+        inGrid(controller, cellWidth, cellHeight) {
             drawBackgrounds(render, cellWidth, cellHeight)
             drawKittyImages(controller, cellWidth, cellHeight, belowText = true)
             drawText(render, glyphs, cellWidth, cellHeight)
             drawKittyImages(controller, cellWidth, cellHeight, belowText = false)
+        }
+    }
+}
+
+/**
+ * What goes over the grid: the cursor, input method composition, the password padlock and the selection handles.
+ * It is drawn apart from the grid, so a cursor blink does not draw every cell again.
+ */
+internal fun DrawScope.drawTerminalOverlay(controller: TerminalController, handleColor: Color) {
+    val glyphs = controller.glyphs ?: return
+    val render = controller.render
+    if (render.columns == 0 || render.rows == 0) return
+
+    val cellWidth = glyphs.cellWidth
+    val cellHeight = glyphs.cellHeight.toFloat()
+    pinchScaled(controller) {
+        inGrid(controller, cellWidth, cellHeight) {
             if (controller.cursorBlinkOn || !render.cursorBlinking) drawCursor(render, glyphs, cellWidth, cellHeight)
             drawComposingText(controller, glyphs, cellWidth, cellHeight)
             drawPasswordIndicator(render, cellWidth, cellHeight)
         }
+        if (controller.selectionVisible) drawSelectionHandles(controller, handleColor)
     }
-    if (showHandles && controller.selectionActive) drawSelectionHandles(controller, handleColor)
+}
+
+/** Draws [block] magnified by the pinch in progress, if there is one. */
+private inline fun DrawScope.pinchScaled(controller: TerminalController, block: DrawScope.() -> Unit) {
+    val factor = controller.pinchScale
+    if (factor == 1f) {
+        block()
+    } else {
+        clipRect {
+            scale(factor, controller.pinchPivot) { block() }
+        }
+    }
+}
+
+/** Draws [block] with the grid's top left corner at the origin, clipped to the grid. */
+private inline fun DrawScope.inGrid(
+    controller: TerminalController,
+    cellWidth: Float,
+    cellHeight: Float,
+    block: DrawScope.() -> Unit,
+) {
+    val render = controller.render
+    val origin = controller.gridOrigin
+    translate(origin.x, origin.y) {
+        clipRect(right = render.columns * cellWidth, bottom = render.rows * cellHeight, block = block)
+    }
 }
 
 private fun DrawScope.drawBackgrounds(render: GhosttyRenderState, cellWidth: Float, cellHeight: Float) {
@@ -296,13 +352,17 @@ private fun DrawScope.drawPasswordIndicator(render: GhosttyRenderState, cellWidt
 }
 
 private fun DrawScope.drawSelectionHandles(controller: TerminalController, color: Color) {
-    val (start, end) = SelectionHandles.anchors(controller) ?: return
+    val (start, end) = SelectionHandles.anchors(controller)
     val radius = SelectionHandles.radius.toPx()
     // Teardrops pointing at the anchor: the start handle hangs to the left of it, the end handle to the right.
-    drawCircle(color, radius, Offset(start.x - radius, start.y + radius))
-    drawRect(color, Offset(start.x - radius, start.y), Size(radius, radius))
-    drawCircle(color, radius, Offset(end.x + radius, end.y + radius))
-    drawRect(color, Offset(end.x, end.y), Size(radius, radius))
+    if (start != null) {
+        drawCircle(color, radius, Offset(start.x - radius, start.y + radius))
+        drawRect(color, Offset(start.x - radius, start.y), Size(radius, radius))
+    }
+    if (end != null) {
+        drawCircle(color, radius, Offset(end.x + radius, end.y + radius))
+        drawRect(color, Offset(end.x, end.y), Size(radius, radius))
+    }
 }
 
 private const val FAINT_ALPHA = 160

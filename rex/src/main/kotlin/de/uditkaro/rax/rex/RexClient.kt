@@ -11,6 +11,7 @@ import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -18,7 +19,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
@@ -77,6 +79,9 @@ sealed interface ClientSignal {
 }
 
 class RexException(val code: String, val status: Int, message: String) : Exception(message) {
+    /** The call may or may not have reached Rex: the connection dropped, or Rex did not answer in time. */
+    val replyLost: Boolean get() = code == "not_connected" || code == "timeout"
+
     companion object {
         fun notConnected() = RexException("not_connected", 0, "not connected")
     }
@@ -112,6 +117,12 @@ class RexClient(
     /** Connection changes and events in the order they happened. Collect it from one place only. */
     val signals: Flow<ClientSignal> = signalChannel.receiveAsFlow()
 
+    /**
+     * Guards [loop], and every change a loop makes to [current], [_state], [reconnectToken] and the
+     * signals. Callers start and stop the client from several threads, and a loop that was stopped
+     * must not undo what [stop] or [suspendConnection] did.
+     */
+    private val lock = Any()
     @Volatile private var current: Connection? = null
     private var loop: Job? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
@@ -119,11 +130,15 @@ class RexClient(
     private val nextId = AtomicLong()
 
     fun start() {
-        if (loop?.isActive == true) {
-            wake.trySend(Unit)
-            return
+        synchronized(lock) {
+            if (loop?.isActive == true) {
+                wake.trySend(Unit)
+                return
+            }
+            val job = scope.launch(start = CoroutineStart.LAZY) { run() }
+            loop = job
+            job.start()
         }
-        loop = scope.launch { run() }
     }
 
     fun retryNow() {
@@ -132,16 +147,11 @@ class RexClient(
 
     /** Closes the connection with a close frame, which ends this client on the server at once. */
     fun stop() {
-        closeFrameOnEnd = true
-        loop?.cancel()
-        loop = null
-        current?.let { conn ->
-            conn.ws?.close(1000, null)
-            conn.fail(RexException.notConnected())
+        synchronized(lock) {
+            closeFrameOnEnd = true
+            end { it.close(1000, null) }
+            reconnectToken = null
         }
-        current = null
-        reconnectToken = null
-        _state.value = State.Stopped
     }
 
     /**
@@ -149,21 +159,45 @@ class RexClient(
      * this client for a minute and the next connection resumes it.
      */
     fun suspendConnection() {
-        closeFrameOnEnd = false
-        loop?.cancel()
+        synchronized(lock) {
+            closeFrameOnEnd = false
+            end { it.cancel() }
+        }
+    }
+
+    /** Cancels the loop and ends its connection with [close]. Call with [lock] held. */
+    private fun end(close: (WebSocket) -> Unit) {
+        val running = loop
+        running?.cancel()
         loop = null
         current?.let { conn ->
-            conn.ws?.cancel()
+            conn.ws?.let(close)
             conn.fail(RexException.notConnected())
         }
         current = null
+        if (running != null) signalChannel.trySend(ClientSignal.Disconnected(Problem.Closed(1000, "stopped")))
         _state.value = State.Stopped
     }
 
-    /** Ends this connection and lets the loop open a fresh one, after a setup call failed half way. */
-    fun dropAndRetry() {
-        reconnectToken = null
-        current?.ws?.close(1000, "retry")
+    /**
+     * Ends the connection that [welcome] opened and lets the loop open a fresh one, after a setup call
+     * failed half way. Does nothing once that connection is gone.
+     */
+    fun dropAndRetry(welcome: Welcome) {
+        synchronized(lock) {
+            if ((_state.value as? State.Connected)?.welcome !== welcome) return
+            reconnectToken = null
+            current?.ws?.close(1000, "retry")
+        }
+    }
+
+    /** Runs [block] with [lock] held if [me] is still the loop. Returns false if it is not. */
+    private inline fun whileCurrent(me: Job, block: () -> Unit): Boolean {
+        synchronized(lock) {
+            if (loop !== me) return false
+            block()
+            return true
+        }
     }
 
     val connected: Boolean get() = current?.welcome?.isCompleted == true && _state.value is State.Connected
@@ -216,18 +250,27 @@ class RexClient(
     @Volatile private var closeFrameOnEnd = true
 
     private suspend fun run() {
+        val me = currentCoroutineContext().job
         var attempt = 0
-        while (scope.isActive) {
-            _state.value = State.Connecting(attempt, (_state.value as? State.Down)?.problem)
+        while (true) {
             val conn = Connection()
-            current = conn
+            val opened = whileCurrent(me) {
+                _state.value = State.Connecting(attempt, (_state.value as? State.Down)?.problem)
+                current = conn
+                conn.ws = http.newWebSocket(
+                    Request.Builder()
+                        .url(endpoint.controlUrl)
+                        .header("Sec-WebSocket-Protocol", CONTROL_SUBPROTOCOL)
+                        .build(),
+                    conn.listener,
+                )
+            }
+            if (!opened) return
             try {
-                attempt = connectOnce(conn, attempt)
+                attempt = connectOnce(me, conn, attempt)
             } catch (e: CancellationException) {
                 if (closeFrameOnEnd) conn.ws?.close(1000, null) else conn.ws?.cancel()
                 conn.fail(RexException.notConnected())
-                if (current === conn) current = null
-                signalChannel.trySend(ClientSignal.Disconnected(Problem.Closed(1000, "stopped")))
                 throw e
             }
         }
@@ -237,35 +280,36 @@ class RexClient(
      * Runs one connection until it closes, then waits before the next attempt. Returns the number of
      * the next attempt.
      */
-    private suspend fun connectOnce(conn: Connection, attemptIn: Int): Int {
+    private suspend fun connectOnce(me: Job, conn: Connection, attemptIn: Int): Int {
         var attempt = attemptIn
-        conn.ws = http.newWebSocket(
-            Request.Builder()
-                .url(endpoint.controlUrl)
-                .header("Sec-WebSocket-Protocol", CONTROL_SUBPROTOCOL)
-                .build(),
-            conn.listener,
-        )
         val problem: Problem = try {
             val welcome = withTimeout(HANDSHAKE_TIMEOUT_MS) { conn.welcome.await() }
-            reconnectToken = conn.token
+            whileCurrent(me) {
+                reconnectToken = conn.token
+                _state.value = State.Connected(welcome)
+                signalChannel.trySend(ClientSignal.Connected(welcome))
+            }
             attempt = 0
-            _state.value = State.Connected(welcome)
-            signalChannel.send(ClientSignal.Connected(welcome))
             conn.closed.await()
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             conn.ws?.cancel()
             Problem.Unreachable("no answer")
         } catch (e: HandshakeFailure) {
             e.problem
+        } catch (e: RexException) {
+            // stop() or suspendConnection() ended the connection during the handshake.
+            Problem.Closed(1006, "gone")
         }
         conn.fail(RexException.notConnected())
-        if (current === conn) current = null
-        signalChannel.send(ClientSignal.Disconnected(problem))
 
         val failed = attempt++
         val retry = retryDelay(problem, failed)
-        _state.value = State.Down(problem, retry, failed)
+        val stillCurrent = whileCurrent(me) {
+            if (current === conn) current = null
+            signalChannel.trySend(ClientSignal.Disconnected(problem))
+            _state.value = State.Down(problem, retry, failed)
+        }
+        if (!stillCurrent) return attempt
         if (retry == null) {
             wake.receive()
             attempt = 0

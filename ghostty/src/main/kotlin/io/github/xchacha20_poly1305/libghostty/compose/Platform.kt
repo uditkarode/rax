@@ -3,8 +3,13 @@ package io.github.xchacha20_poly1305.libghostty.compose
 import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.view.accessibility.AccessibilityManager
+import android.widget.Toast
 import androidx.compose.foundation.magnifier
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -102,6 +107,28 @@ internal fun imageBitmapOf(width: Int, height: Int, argb: IntArray): ImageBitmap
 internal fun rememberPlatformClipboard(): GhosttyClipboard {
     val context = LocalContext.current
     return remember(context) { GhosttyAndroidClipboard(context) }
+}
+
+/** Shows a string resource briefly over the app. */
+@Composable
+internal fun rememberShowMessage(): (Int) -> Unit {
+    val context = LocalContext.current
+    return remember(context) { { message -> Toast.makeText(context, message, Toast.LENGTH_SHORT).show() } }
+}
+
+/** Whether an accessibility service, such as a screen reader, is on. */
+@Composable
+internal fun rememberAccessibilityEnabled(): State<Boolean> {
+    val context = LocalContext.current
+    val manager = remember(context) { context.getSystemService(AccessibilityManager::class.java) }
+    val enabled = remember(manager) { mutableStateOf(manager?.isEnabled == true) }
+    DisposableEffect(manager) {
+        val listener = AccessibilityManager.AccessibilityStateChangeListener { enabled.value = it }
+        manager?.addAccessibilityStateChangeListener(listener)
+        enabled.value = manager?.isEnabled == true
+        onDispose { manager?.removeAccessibilityStateChangeListener(listener) }
+    }
+    return enabled
 }
 
 /** Shows a platform magnifier over [center] while it is specified. */

@@ -38,8 +38,11 @@ enum class Need {
     LocalNetwork,
 }
 
-/** What the phone itself allows, which decides whether a host can be reached at all. */
-data class Access(val tailnet: TailnetStatus, val localNetwork: Boolean)
+/**
+ * What the phone itself allows, which decides whether a host can be reached at all. [localNames]
+ * says for each host name that was looked up whether it points into the local network.
+ */
+data class Access(val tailnet: TailnetStatus, val localNetwork: Boolean, val localNames: Map<String, Boolean> = emptyMap())
 
 @Immutable
 data class SessionGroup(val id: String, val name: String, val tabs: List<TabRow>)
@@ -58,4 +61,6 @@ data class TabRow(
     val programName: String,
     @DrawableRes val icon: Int?,
     val waiting: Boolean,
+    /** When the program started to wait, in milliseconds since the epoch, if it says. */
+    val waitingSince: Long? = null,
 )

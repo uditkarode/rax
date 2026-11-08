@@ -1,9 +1,11 @@
 package de.uditkaro.rax.ui
 
-/** Requests that need the activity, such as permission prompts. */
+/**
+ * Requests that need the activity, such as permission prompts. Each asks for its permission, or
+ * opens Rax's system settings once Android stops asking. Screens learn the answer from the
+ * permission's state in [de.uditkaro.rax.AppGraph].
+ */
 class SystemActions(
-    /** Asks for local network access, or opens Rax's system settings once Android stops asking. */
     val askLocalNetwork: () -> Unit,
-    /** Asks to post notifications and reports whether Rax may. */
-    val askNotifications: (onResult: (Boolean) -> Unit) -> Unit,
+    val askNotifications: () -> Unit,
 )

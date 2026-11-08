@@ -131,6 +131,24 @@ fn viewportPin(t: *vt.Terminal, col: i32, row: i32) ?vt.Pin {
     } });
 }
 
+/// Like `viewportPin`, but `row` may lie above or below the viewport.
+fn viewportRowPin(t: *vt.Terminal, col: i32, row: i32) ?vt.Pin {
+    if (row >= 0 and row < t.rows) return viewportPin(t, col, row);
+    const top = viewportPin(t, col, 0) orelse return null;
+    return if (row < 0) top.up(@abs(row)) else top.down(@intCast(row));
+}
+
+/// The row of `pin`, counted from the top of the scrollback.
+fn screenRow(screen: *const vt.Screen, pin: vt.Pin) ?u32 {
+    const pt = screen.pages.pointFromPin(.screen, pin) orelse return null;
+    return pt.screen.y;
+}
+
+fn viewportRow(row: u32, top: u32) i32 {
+    const offset = @as(i64, row) - @as(i64, top);
+    return @intCast(std.math.clamp(offset, std.math.minInt(i32), std.math.maxInt(i32)));
+}
+
 fn installSelection(s: *Session, selection: ?vt.Selection) bool {
     const sel = selection orelse return false;
     s.terminal.screens.active.select(sel) catch return false;
@@ -138,7 +156,9 @@ fn installSelection(s: *Session, selection: ?vt.Selection) bool {
     return true;
 }
 
-fn formatSelection(env: *jni.Env, s: *Session, selection: ?vt.Selection) jni.ByteArray {
+/// The text of `selection`, or of the whole screen without one. With
+/// `max_bytes`, longer text returns null, and formatting stops there.
+fn formatSelection(env: *jni.Env, s: *Session, selection: ?vt.Selection, max_bytes: ?usize) jni.ByteArray {
     var formatter: vt.formatter.TerminalFormatter = .init(&s.terminal, .{
         .emit = .plain,
         .unwrap = true,
@@ -146,6 +166,13 @@ fn formatSelection(env: *jni.Env, s: *Session, selection: ?vt.Selection) jni.Byt
     });
     formatter.extra = .none;
     if (selection) |sel| formatter.content = .{ .selection = sel };
+    if (max_bytes) |max| {
+        const buf = alloc.alloc(u8, max) catch return null;
+        defer alloc.free(buf);
+        var out: std.Io.Writer = .fixed(buf);
+        formatter.format(&out) catch return null;
+        return env.newByteArray(out.buffered());
+    }
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
     formatter.format(&out.writer) catch return null;
@@ -173,8 +200,8 @@ const natives = struct {
         grapheme_cluster: jni.Boolean,
         callbacks: CallbacksRef,
     ) i64 {
-        const version = if (xtversion != null) env.stringAlloc(alloc, xtversion) catch return 0 else &.{};
-        defer alloc.free(version);
+        const version: ?[:0]u8 = if (xtversion != null) env.stringAlloc(alloc, xtversion) catch return 0 else null;
+        defer if (version) |v| alloc.free(v);
         const terminfo = if (terminfo_name != null) env.stringAlloc(alloc, terminfo_name) catch return 0 else null;
         defer if (terminfo) |name| alloc.free(name);
 
@@ -183,7 +210,7 @@ const natives = struct {
             .cols = std.math.cast(u16, cols) orelse 0,
             .rows = std.math.cast(u16, rows) orelse 0,
             .max_scrollback_lines = @intCast(@max(max_scrollback_lines, 0)),
-            .xtversion = version,
+            .xtversion = version orelse "",
             .terminfo_name = terminfo,
             .cursor_style = std.enums.fromInt(vt.CursorStyle, cursor_style) orelse .block,
             .cursor_blink = cursor_blink != 0,
@@ -207,14 +234,14 @@ const natives = struct {
         if (snapshot_bytes == null) return 0;
         const bytes = env.byteArrayAlloc(alloc, snapshot_bytes) catch return 0;
         defer alloc.free(bytes);
-        const version = if (xtversion != null) env.stringAlloc(alloc, xtversion) catch return 0 else &.{};
-        defer alloc.free(version);
+        const version: ?[:0]u8 = if (xtversion != null) env.stringAlloc(alloc, xtversion) catch return 0 else null;
+        defer if (version) |v| alloc.free(v);
         const terminfo = if (terminfo_name != null) env.stringAlloc(alloc, terminfo_name) catch return 0 else null;
         defer if (terminfo) |name| alloc.free(name);
 
         const callbacks_ref = if (callbacks != null) env.call("NewGlobalRef", .{callbacks}) else null;
         const s = Session.restore(alloc, @ptrCast(callbacks_ref), .{
-            .xtversion = version,
+            .xtversion = version orelse "",
             .terminfo_name = terminfo,
         }, bytes) catch |err| {
             std.log.warn("failed to restore terminal snapshot: {t}", .{err});
@@ -251,21 +278,29 @@ const natives = struct {
         return optionalBytes(env, s.pty_out.items);
     }
 
+    /// Returns the in-band size report (mode 2048) for the new size, if the
+    /// program asked for one.
     pub fn nativeResize(
-        _: *jni.Env,
+        env: *jni.Env,
         _: jni.Object,
         handle: i64,
         cols: jni.Int,
         rows: jni.Int,
         cell_width_px: jni.Int,
         cell_height_px: jni.Int,
-    ) void {
-        session(handle).resize(
-            std.math.cast(u16, cols) orelse return,
-            std.math.cast(u16, rows) orelse return,
-            std.math.cast(u32, cell_width_px) orelse return,
-            std.math.cast(u32, cell_height_px) orelse return,
-        ) catch |err| std.log.warn("resize failed: {t}", .{err});
+    ) jni.ByteArray {
+        const s = session(handle);
+        s.pty_out.clearRetainingCapacity();
+        s.resize(
+            std.math.cast(u16, cols) orelse return null,
+            std.math.cast(u16, rows) orelse return null,
+            std.math.cast(u32, cell_width_px) orelse return null,
+            std.math.cast(u32, cell_height_px) orelse return null,
+        ) catch |err| {
+            std.log.warn("resize failed: {t}", .{err});
+            return null;
+        };
+        return optionalBytes(env, s.pty_out.items);
     }
 
     pub fn nativeTakeEventFlags(_: *jni.Env, _: jni.Object, handle: i64) jni.Int {
@@ -373,6 +408,7 @@ const natives = struct {
         s.terminal.flags.dirty.palette = true;
 
         s.background = s.effectiveBackground();
+        s.foreground = s.effectiveForeground();
         s.markDirty();
     }
 
@@ -412,6 +448,7 @@ const natives = struct {
         if (t.modes.get(.mouse_event_x10) or t.modes.get(.mouse_event_normal) or
             t.modes.get(.mouse_event_button) or t.modes.get(.mouse_event_any)) state |= 2;
         if (t.modes.get(.synchronized_output)) state |= 4;
+        if (t.screens.active.selection != null) state |= 8;
         return state;
     }
 
@@ -532,9 +569,29 @@ const natives = struct {
         row: jni.Int,
     ) jni.Boolean {
         const s = session(handle);
-        const start = viewportPin(&s.terminal, anchor_col, anchor_row) orelse return 0;
+        const start = viewportRowPin(&s.terminal, anchor_col, anchor_row) orelse return 0;
         const end = viewportPin(&s.terminal, col, row) orelse return 0;
         return boolean(installSelection(s, .init(start, end, false)));
+    }
+
+    /// `[first column, first row, last column, last row]` of the selection, in viewport cells. A row
+    /// above the viewport is negative, and a row below it is the row count or more.
+    pub fn nativeSelectionBounds(env: *jni.Env, _: jni.Object, handle: i64) jni.IntArray {
+        const t = &session(handle).terminal;
+        const screen = t.screens.active;
+        const sel = screen.selection orelse return null;
+        const top = viewportPin(t, 0, 0) orelse return null;
+        const top_y = screenRow(screen, top) orelse return null;
+        const first = sel.topLeft(screen);
+        const last = sel.bottomRight(screen);
+        const first_y = screenRow(screen, first) orelse return null;
+        const last_y = screenRow(screen, last) orelse return null;
+        return env.newIntArray(&.{
+            first.x,
+            viewportRow(first_y, top_y),
+            last.x,
+            viewportRow(last_y, top_y),
+        });
     }
 
     pub fn nativeClearSelection(_: *jni.Env, _: jni.Object, handle: i64) void {
@@ -543,10 +600,11 @@ const natives = struct {
         s.markDirty();
     }
 
-    pub fn nativeSelectionText(env: *jni.Env, _: jni.Object, handle: i64) jni.ByteArray {
+    /// A negative `max_bytes` means no limit.
+    pub fn nativeSelectionText(env: *jni.Env, _: jni.Object, handle: i64, max_bytes: jni.Int) jni.ByteArray {
         const s = session(handle);
         const selection = s.terminal.screens.active.selection orelse return null;
-        return formatSelection(env, s, selection);
+        return formatSelection(env, s, selection, std.math.cast(usize, max_bytes));
     }
 
     pub fn nativeViewportText(env: *jni.Env, _: jni.Object, handle: i64) jni.ByteArray {
@@ -554,11 +612,11 @@ const natives = struct {
         const t = &s.terminal;
         const start = viewportPin(t, 0, 0) orelse return null;
         const end = viewportPin(t, t.cols - 1, t.rows - 1) orelse return null;
-        return formatSelection(env, s, .init(start, end, false));
+        return formatSelection(env, s, .init(start, end, false), null);
     }
 
     pub fn nativeTranscriptText(env: *jni.Env, _: jni.Object, handle: i64) jni.ByteArray {
-        return formatSelection(env, session(handle), null);
+        return formatSelection(env, session(handle), null, null);
     }
 
     pub fn nativeGetBackgroundColor(_: *jni.Env, _: jni.Object, handle: i64) jni.Int {

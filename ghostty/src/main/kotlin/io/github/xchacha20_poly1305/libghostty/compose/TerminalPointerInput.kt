@@ -28,7 +28,6 @@ import io.github.xchacha20_poly1305.libghostty.GhosttyMouseButton
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 internal fun Modifier.terminalPointerInput(
     controller: TerminalController,
@@ -64,13 +63,18 @@ internal fun Modifier.terminalPointerInput(
     }
 }.pointerInput(controller) {
     awaitPointerEventScope {
+        // High resolution wheels and touchpads report a notch in fractions; whole rows scroll as they add up.
+        var pendingRows = 0f
         while (true) {
             val event = awaitPointerEvent()
             if (event.type != PointerEventType.Scroll) continue
             val change = event.changes.firstOrNull() ?: continue
             val delta = change.scrollDelta.y
             if (delta == 0f) continue
-            val rows = (if (delta > 0) WHEEL_SCROLL_ROWS else -WHEEL_SCROLL_ROWS) * maxOf(1, abs(delta).toInt())
+            if (pendingRows != 0f && (pendingRows > 0) != (delta > 0)) pendingRows = 0f
+            pendingRows += delta * WHEEL_SCROLL_ROWS
+            val rows = pendingRows.toInt()
+            pendingRows -= rows
             controller.scrollContent(rows, controller.cellAt(change.position))
             change.consume()
         }
@@ -138,7 +142,7 @@ private suspend fun AwaitPointerEventScope.mouseGesture(
         else -> {
             val modifiers = downEvent.keyboardModifiers
             if (modifiers.isCtrlPressed || modifiers.isMetaPressed) {
-                controller.linkAt(start)?.let { controller.uriHandler.openUri(it) }
+                controller.linkAt(start)?.let(controller::openLink)
                 awaitRelease(down)
                 return
             }
@@ -181,13 +185,13 @@ private suspend fun AwaitPointerEventScope.touchGesture(
     focusRequester: FocusRequester,
     down: PointerInputChange,
 ): Float {
-    if (controller.selectionActive && dragSelectionHandle(controller, down)) return 0f
+    if (controller.selectionVisible && dragSelectionHandle(controller, down)) return 0f
 
     // The tracker sees every move from the down on, so a quick flick that barely passes the slop still has samples.
     val tracker = VelocityTracker()
     tracker.addPointerInputChange(down)
     val start = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-        awaitTouchStart(controller, down, tracker, viewConfiguration.touchSlop)
+        awaitTouchStart(down, tracker, viewConfiguration.touchSlop)
     } ?: TouchStart.LongPress
     return when (start) {
         TouchStart.Tap -> {
@@ -202,7 +206,13 @@ private suspend fun AwaitPointerEventScope.touchGesture(
             0f
         }
 
-        TouchStart.Pinch -> 0f
+        // Out here, the long press timeout no longer runs, so a slow pinch stays a pinch.
+        is TouchStart.Pinch -> {
+            pinch(controller, start.event)
+            0f
+        }
+
+        TouchStart.Lost -> 0f
     }
 }
 
@@ -215,22 +225,22 @@ private sealed interface TouchStart {
 
     data object LongPress : TouchStart
 
-    data object Pinch : TouchStart
+    /** A second finger came down; [event] is the one it came down in. */
+    class Pinch(val event: PointerEvent) : TouchStart
+
+    /** The finger left the gesture without lifting. */
+    data object Lost : TouchStart
 }
 
 private suspend fun AwaitPointerEventScope.awaitTouchStart(
-    controller: TerminalController,
     down: PointerInputChange,
     tracker: VelocityTracker,
     slop: Float,
 ): TouchStart {
     while (true) {
         val event = awaitPointerEvent()
-        if (event.changes.count { it.pressed } > 1) {
-            pinch(controller, event)
-            return TouchStart.Pinch
-        }
-        val change = event.changes.firstOrNull { it.id == down.id } ?: return TouchStart.Pinch
+        if (event.changes.count { it.pressed } > 1) return TouchStart.Pinch(event)
+        val change = event.changes.firstOrNull { it.id == down.id } ?: return TouchStart.Lost
         if (change.changedToUp()) return TouchStart.Tap
         tracker.addPointerInputChange(change)
         if ((change.position - down.position).getDistance() > slop) return TouchStart.Scroll(change)
@@ -317,26 +327,26 @@ private suspend fun fling(
     }
 }
 
-/** Zooms the font while two fingers are down. */
+/**
+ * Zooms while two fingers are down: the drawing scales with them, and the font size changes once they lift, since
+ * each new size lays out the grid again and resizes the program.
+ */
 private suspend fun AwaitPointerEventScope.pinch(controller: TerminalController, first: PointerEvent) {
-    fun spread(event: PointerEvent): Float? {
-        val pressed = event.changes.filter { it.pressed }
-        if (pressed.size < 2) return null
-        return (pressed[0].position - pressed[1].position).getDistance()
-    }
+    fun pressed(event: PointerEvent) = event.changes.filter { it.pressed }.takeIf { it.size >= 2 }
 
-    val initial = spread(first) ?: return
-    var applied = 1f
-    while (true) {
-        val event = awaitPointerEvent()
-        event.changes.forEach { it.consume() }
-        val current = spread(event) ?: return
-        val scale = current / initial
-        val steps = ((scale - applied) / PINCH_SCALE_STEP).toInt()
-        if (steps != 0) {
-            applied += steps * PINCH_SCALE_STEP
-            controller.changeFontSize(steps)
+    val start = pressed(first) ?: return
+    val initial = (start[0].position - start[1].position).getDistance()
+    val pivot = (start[0].position + start[1].position) / 2f
+    try {
+        while (true) {
+            val event = awaitPointerEvent()
+            event.changes.forEach { it.consume() }
+            val fingers = pressed(event) ?: return
+            val scale = (fingers[0].position - fingers[1].position).getDistance() / initial
+            controller.pinchTo(((scale - 1f) / PINCH_SCALE_STEP).toInt(), pivot)
         }
+    } finally {
+        controller.endPinch()
     }
 }
 
@@ -376,19 +386,17 @@ private suspend fun AwaitPointerEventScope.dragSelectionHandle(
     controller: TerminalController,
     down: PointerInputChange,
 ): Boolean {
-    val (start, end) = SelectionHandles.anchors(controller) ?: return false
-    val bounds = controller.selectionBounds() ?: return false
+    val (start, end) = SelectionHandles.anchors(controller)
+    val (first, last) = controller.selectionEnds ?: return false
     val density = controller.density
     val radius = SelectionHandles.radius.value * density
     val slop = SelectionHandles.hitSlop.value * density
-    val startCenter = Offset(start.x - radius, start.y + radius)
-    val endCenter = Offset(end.x + radius, end.y + radius)
-    val toStart = (down.position - startCenter).getDistance()
-    val toEnd = (down.position - endCenter).getDistance()
+    val toStart = start?.let { (down.position - Offset(it.x - radius, it.y + radius)).getDistance() } ?: Float.POSITIVE_INFINITY
+    val toEnd = end?.let { (down.position - Offset(it.x + radius, it.y + radius)).getDistance() } ?: Float.POSITIVE_INFINITY
     // Dragging a handle moves that end of the selection; the other end stays put as the anchor.
     var anchor = when {
-        toEnd <= slop && toEnd <= toStart -> bounds.first
-        toStart <= slop -> bounds.second
+        toEnd <= slop && toEnd <= toStart -> first
+        toStart <= slop -> last
         else -> return false
     }
     down.consume()

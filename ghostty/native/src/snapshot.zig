@@ -165,6 +165,7 @@ const RowWriter = struct {
             const dest = cells_offset + x * @sizeOf(Cell);
             @memcpy(self.buf[dest..][0..@sizeOf(Cell)], std.mem.asBytes(&record));
         }
+        if (text.exhausted) return error.OutOfSpace;
 
         var end = text_offset + text.units * 2;
         if (end % 4 != 0) {
@@ -187,6 +188,8 @@ const RowWriter = struct {
 const TextWriter = struct {
     buf: []u8,
     units: usize = 0,
+    /// Text did not fit the buffer, as opposed to a cell reaching its limit.
+    exhausted: bool = false,
 
     /// Appends `cp` as UTF-16 if it fits both the buffer and `limit`
     /// units from `start`.
@@ -202,7 +205,10 @@ const TextWriter = struct {
             break :len 2;
         };
         if (self.units + len - start > limit) return false;
-        if ((self.units + len) * 2 > self.buf.len) return false;
+        if ((self.units + len) * 2 > self.buf.len) {
+            self.exhausted = true;
+            return false;
+        }
         @memcpy(self.buf[self.units * 2 ..][0 .. len * 2], std.mem.sliceAsBytes(pair[0..len]));
         self.units += len;
         return true;

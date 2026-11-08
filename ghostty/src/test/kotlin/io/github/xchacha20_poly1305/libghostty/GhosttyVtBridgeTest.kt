@@ -297,16 +297,48 @@ class GhosttyVtBridgeTest {
     @Test
     fun selection() {
         write("hello world\r\nsecond line")
-        assertNull(GhosttyVt.nativeSelectionText(handle))
+        assertNull(GhosttyVt.nativeSelectionText(handle, -1))
+        assertEquals(0, GhosttyVt.nativeViewportState(handle) and GhosttyVt.VIEWPORT_SELECTION)
         assertTrue(GhosttyVt.nativeSelectWord(handle, 7, 0))
-        assertEquals("world", GhosttyVt.nativeSelectionText(handle).text())
+        assertEquals(GhosttyVt.VIEWPORT_SELECTION, GhosttyVt.nativeViewportState(handle) and GhosttyVt.VIEWPORT_SELECTION)
+        assertEquals("world", GhosttyVt.nativeSelectionText(handle, -1).text())
         assertTrue(GhosttyVt.nativeSetSelection(handle, 6, 0, 5, 1))
-        assertEquals("world\nsecond", GhosttyVt.nativeSelectionText(handle).text())
+        assertEquals("world\nsecond", GhosttyVt.nativeSelectionText(handle, -1).text())
         assertTrue(GhosttyVt.nativeSelectAll(handle))
-        assertEquals("hello world\nsecond line", GhosttyVt.nativeSelectionText(handle).text())
+        assertEquals("hello world\nsecond line", GhosttyVt.nativeSelectionText(handle, -1).text())
         GhosttyVt.nativeClearSelection(handle)
-        assertNull(GhosttyVt.nativeSelectionText(handle))
+        assertNull(GhosttyVt.nativeSelectionText(handle, -1))
+        assertEquals(0, GhosttyVt.nativeViewportState(handle) and GhosttyVt.VIEWPORT_SELECTION)
         assertFalse(GhosttyVt.nativeSetSelection(handle, 0, 0, 500, 0))
+    }
+
+    @Test
+    fun selectionTextStopsAtTheLimit() {
+        write("hello world")
+        assertTrue(GhosttyVt.nativeSelectAll(handle))
+        assertEquals("hello world", GhosttyVt.nativeSelectionText(handle, 11).text())
+        assertNull(GhosttyVt.nativeSelectionText(handle, 10))
+    }
+
+    @Test
+    fun selectionAnchorCanLieOutsideTheViewport() {
+        repeat(40) { write("line $it\r\n") }
+        GhosttyVt.nativeScroll(handle, -10)
+        // The viewport shows lines 7 to 30; the anchor is two rows above it, on line 5.
+        assertTrue(GhosttyVt.nativeSetSelection(handle, 0, -2, 5, 0))
+        assertEquals("line 5\nline 6\nline 7", GhosttyVt.nativeSelectionText(handle, -1).text())
+        // Two rows below the viewport is line 32.
+        assertTrue(GhosttyVt.nativeSetSelection(handle, 6, 25, 0, 23))
+        assertEquals("line 30\nline 31\nline 32", GhosttyVt.nativeSelectionText(handle, -1).text())
+    }
+
+    @Test
+    fun resizeReturnsInBandSizeReport() {
+        assertNull(GhosttyVt.nativeResize(handle, 100, 30, 9, 18))
+        write("\u001b[?2048h")
+        assertEquals("\u001b[48;24;80;432;720t", GhosttyVt.nativeResize(handle, 80, 24, 9, 18).text())
+        // The next write starts with an empty reply, so the report is not repeated.
+        assertNull(write("x"))
     }
 
     @Test

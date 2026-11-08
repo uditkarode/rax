@@ -30,9 +30,11 @@ jobs:
           go-version-file: tailnet/go/go.mod
           cache-dependency-path: tailnet/go/go.sum
 
-      - name: Read the Zig version
+      - name: Read the Zig and NDK versions
         id: zig
-        run: echo "version=$(sed -n 's/^ *\.minimum_zig_version = "\(.*\)",$/\1/p' ghostty/native/build.zig.zon)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=$(sed -n 's/^ *\.minimum_zig_version = "\(.*\)",$/\1/p' ghostty/native/build.zig.zon)" >> "$GITHUB_OUTPUT"
+          echo "ndk=$(sed -n 's/^ndk = "\(.*\)"/\1/p' gradle/libs.versions.toml)" >> "$GITHUB_OUTPUT"
 
       - uses: mlugg/setup-zig@v2
         with:
@@ -40,13 +42,14 @@ jobs:
           # build-native.sh keeps Zig's cache in its own directory, cached below.
           use-cache: false
 
+      # Zig never prunes its cache, so each change to the native build starts a new cache instead of
+      # adding to an old one.
       - uses: actions/cache@v6
         with:
           path: |
             ghostty/build/zig-cache
             ghostty/native/zig-pkg
-          key: zig-${{ steps.zig.outputs.version }}-${{ hashFiles('ghostty/GHOSTTY_COMMIT', 'ghostty/patches/*.patch', 'ghostty/native/*.zig', 'ghostty/native/build.zig.zon', 'ghostty/native/src/**') }}
-          restore-keys: zig-${{ steps.zig.outputs.version }}-
+          key: zig-${{ steps.zig.outputs.version }}-ndk-${{ steps.zig.outputs.ndk }}-${{ hashFiles('ghostty/GHOSTTY_COMMIT', 'ghostty/patches/*.patch', 'ghostty/build-native.sh', 'ghostty/native/*.zig', 'ghostty/native/build.zig.zon', 'ghostty/native/jni.map', 'ghostty/native/src/**') }}
 
       - name: Install Android SDK packages
         run: |

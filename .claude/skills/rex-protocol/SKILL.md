@@ -37,18 +37,26 @@ says Rex is newer. Before raising Rax's revision, read the schema diff (see "Whe
 
 - Every change to `HostState` goes through one inbox coroutine, in the order the server sent it.
   Do not update the state from anywhere else, or the UI can show a state the server never had.
-- `gen` goes up with every new connection. Each async read carries the `gen` it started under, and
-  a result from an older `gen` is dropped.
+- `gen` goes up when a connection starts and when it ends. Each async read carries the `gen` it
+  started under, and a result from an older `gen` is dropped.
 - Bootstrap: `session.bootstrap` with `event_scope: all`. Events that arrive before its reply are
   held, then replayed if their `seq` is above the `seq` of the reply, because the reply already
-  includes everything up to it.
+  includes everything up to it. A `desktop_notification` is not held: it changes no state, and the
+  reply does not carry it.
 - Views: `session.attach` once per session, then `session.view` when `session_view_changed`
-  reports a higher revision. Reads of the same session are coalesced.
+  reports a higher revision. Reads of the same session are coalesced. When the server's
+  `instance_id` changes, Rex restarted and can reuse session and pane IDs, so the views and pane
+  facts Rax kept are dropped.
 - Pane facts (title, directory, process, program status) are not in the view. Rax reads them once
-  per pane, then keeps them current from `block_event` events. Each event bumps a stamp for that
-  fact, so a read that started before the event cannot overwrite the newer value.
-- After a reconnect, every pane's facts are read again, because events from the time without a
-  connection are lost.
+  per pane, minimized panes included, then keeps them current from `block_event` events. Each event
+  bumps a stamp for that fact, so a read that started before the event cannot overwrite the newer
+  value. Title and directory events carry the whole fact, so such a read is dropped. Process and
+  status events carry a part, so the read fills in the rest.
+- An attach or a fact read that fails with `timeout`, `conflict` or a server error is tried again
+  with backoff while the connection stays up. `SessionState.attach` records whether the current
+  connection attached the session, or failed to for good.
+- After a reconnect, every pane's facts are read again, also when the view did not change, because
+  events from the time without a connection are lost.
 - Alerts: `Alert.Waiting` fires when a pane's program status gains a `blocked` record, on the
   transition only. `Alert.Notification` comes from `desktop_notification` (OSC 9 and similar).
 
@@ -104,7 +112,8 @@ REJECT reasons that matter:
   up (pings every 120 s, 60 s to answer). RESUME is what replaces a dropped data connection.
 
 Close code 4000 means the pane closed. `data.connect` failing with `not_found` or
-`session_not_found` also means it is gone.
+`session_not_found` also means it is gone. Close code 1013 means Rex no longer has the stream, so
+Rax starts over with a new ticket and does not send a RESUME.
 
 ## Ownership: who sizes a pane
 
@@ -116,14 +125,18 @@ the desktop gets its own size back.
   `owner` is another client, another device took it. Rax stops sizing it and offers "Use here".
 - A release must still reach Rex after the terminal screen is gone, because a client that resumes
   gets its panes back. A lost release would leave the desktop at the phone's size. Rax sends
-  ownership changes from the app scope and waits up to 90 s for the connection.
+  ownership changes from the app scope and waits up to 90 s for a connection that has attached the
+  session.
 
 ## Input
 
 - Keys and text go through the pane's `write` method as a UTF-8 string, one call in flight, with
-  whatever was typed meanwhile joined into the next call.
-- While the emulator reads output, it answers terminal queries (DA, DSR and similar). Rex's own
-  terminal already answers them, so Rax drops anything the emulator sends during `feedOutput`.
+  whatever was typed meanwhile joined into the next call. A call larger than the welcome's
+  `max_message_bytes` would close the connection, so a large paste goes out in parts, in order.
+- Writes, sizes and colours wait until the connection has attached the session
+  (`HostState.canCall`). Before that, Rex refuses calls that name the session with `conflict`.
+- Rex's own terminal answers terminal queries (DA, DSR and similar), so Rax makes its emulators
+  with `repliesToProgram = false`, and they send only what the user types.
 - Sizes go through `resize` with columns, rows and cell pixels. Only the newest pending size is
   sent, and it applies only while this client owns the pane.
 

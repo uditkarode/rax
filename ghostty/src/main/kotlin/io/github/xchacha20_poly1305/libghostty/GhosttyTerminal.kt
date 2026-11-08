@@ -20,6 +20,10 @@ public class GhosttyTerminal internal constructor() {
     public val isSynchronizedOutput: Boolean
         get() = viewportState() and GhosttyVt.VIEWPORT_SYNC_OUTPUT != 0
 
+    /** Whether the active screen has a selection, in the viewport or not. */
+    public val hasSelection: Boolean
+        get() = viewportState() and GhosttyVt.VIEWPORT_SELECTION != 0
+
     private fun viewportState(): Int = GhosttyVt.nativeViewportState(handle)
 
     public val scrollbar: GhosttyScrollbar
@@ -45,15 +49,30 @@ public class GhosttyTerminal internal constructor() {
 
     public fun selectAll(): Boolean = GhosttyVt.nativeSelectAll(handle)
 
-    /** Selects the cells from the anchor to the given cell in reading order, both included. */
+    /**
+     * Selects the cells from the anchor to the given cell in reading order, both included. [anchorRow] may lie
+     * outside the viewport: negative above it, the viewport's row count or more below it.
+     */
     public fun select(anchorColumn: Int, anchorRow: Int, column: Int, row: Int): Boolean =
         GhosttyVt.nativeSetSelection(handle, anchorColumn, anchorRow, column, row)
+
+    /**
+     * The first and last selected cells as `[firstColumn, firstRow, lastColumn, lastRow]`, or null without a
+     * selection. A row may lie outside the viewport: negative above it, the viewport's row count or more below it.
+     */
+    public fun selectionBounds(): IntArray? = GhosttyVt.nativeSelectionBounds(handle)
 
     public fun clearSelection() {
         GhosttyVt.nativeClearSelection(handle)
     }
 
-    public fun selectionText(): String? = GhosttyVt.nativeSelectionText(handle)?.toString(Charsets.UTF_8)
+    public fun selectionText(): String? = GhosttyVt.nativeSelectionText(handle, -1)?.toString(Charsets.UTF_8)
+
+    /** The selected text if it takes at most [maxBytes] bytes of UTF-8, else null. */
+    public fun selectionText(maxBytes: Int): String? {
+        require(maxBytes >= 0) { "maxBytes must be >= 0" }
+        return GhosttyVt.nativeSelectionText(handle, maxBytes)?.toString(Charsets.UTF_8)
+    }
 
     public fun viewportText(): String? = GhosttyVt.nativeViewportText(handle)?.toString(Charsets.UTF_8)
 

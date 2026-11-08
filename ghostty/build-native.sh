@@ -7,6 +7,7 @@
 #   build-native.sh android <out>     The JNI library for arm64-v8a and x86_64, as <out>/<abi>/*.so.
 #   build-native.sh kotlin <out>      The Kotlin mirrors of Ghostty's input types.
 #   build-native.sh host <out>        The JNI library for this computer, for the JVM unit tests.
+#   build-native.sh zig-version       Print the version of the zig this script uses.
 #
 # Environment: ANDROID_NDK_HOME (android only), ZIG (default: zig on PATH, then Homebrew's zig).
 set -euo pipefail
@@ -25,11 +26,15 @@ if [[ -z "${ZIG:-}" ]]; then
   done
 fi
 
-zig_build() {
+require_zig() {
   if [[ -z "$ZIG" ]]; then
     echo "build-native.sh: zig not found. Install the version in native/build.zig.zon or set ZIG." >&2
     exit 1
   fi
+}
+
+zig_build() {
+  require_zig
   (cd "$here/native" && ZIG_GLOBAL_CACHE_DIR="$cache" "$ZIG" build "$@" --cache-dir "$cache")
 }
 
@@ -79,6 +84,10 @@ case "$command" in
     mkdir -p "$out"
     cp -R "$prefix/kotlin/." "$out/"
     ;;
+  zig-version)
+    require_zig
+    "$ZIG" version
+    ;;
   host)
     prefix="$here/build/zig-out/host"
     rm -rf "$prefix" "$out"
@@ -87,7 +96,7 @@ case "$command" in
     find "$prefix" -name '*ghostty_jni*' \( -name '*.so' -o -name '*.dylib' \) -exec cp {} "$out/" \;
     ;;
   *)
-    sed -n '2,11p' "$0" >&2
+    sed -n '2,12p' "$0" >&2
     exit 1
     ;;
 esac

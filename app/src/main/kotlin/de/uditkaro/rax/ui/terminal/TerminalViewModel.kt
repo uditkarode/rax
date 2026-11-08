@@ -12,12 +12,18 @@ import de.uditkaro.rax.rex.HostState
 import de.uditkaro.rax.rex.PaneInput
 import de.uditkaro.rax.rex.PaneTheme
 import de.uditkaro.rax.rex.RexClient
+import de.uditkaro.rax.rex.RexException
+import de.uditkaro.rax.rex.RexHost
 import de.uditkaro.rax.rex.TerminalStream
 import de.uditkaro.rax.rex.WindowView
 import de.uditkaro.rax.ui.home.Access
 import de.uditkaro.rax.ui.home.Link
 import de.uditkaro.rax.ui.home.Need
+import de.uditkaro.rax.ui.home.TabRow
+import de.uditkaro.rax.ui.home.appName
 import de.uditkaro.rax.ui.home.hostLink
+import de.uditkaro.rax.ui.home.shortPath
+import de.uditkaro.rax.ui.home.tabRow
 import io.github.xchacha20_poly1305.libghostty.GhosttyTerminalSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -28,21 +34,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 
 /** What the stream of the shown pane is doing. */
-enum class PaneStatus { Opening, Live, Reconnecting, ElsewhereOwned, Closed, Unavailable }
+enum class PaneStatus { Opening, Live, Reconnecting, Closed, Unavailable }
 
 /** What the terminal area shows. */
 sealed interface PaneView {
@@ -61,6 +66,18 @@ sealed interface PaneView {
 }
 
 data class PaneTarget(val windowId: String, val blockId: String)
+
+/** What the screen shows around the terminal: the shown tab, its panes and the session. */
+data class PaneHeader(
+    val sessionName: String,
+    /** Null until the tab's layout arrives. */
+    val tab: TabRow?,
+    val subtitle: String,
+    val panes: List<PaneChip>,
+)
+
+/** A pane of the shown tab. [label] is the name the user gave it, if any. */
+data class PaneChip(val id: String, val name: String, val label: String?, val waiting: Boolean)
 
 /**
  * Sends the pane's stream to the terminal emulator and the user's keys to Rex. When the terminal
@@ -87,11 +104,18 @@ class TerminalViewModel(
     private val _status = MutableStateFlow(PaneStatus.Opening)
     val status: StateFlow<PaneStatus> = _status.asStateFlow()
 
+    /** Another device took the shown pane. Main thread only; Use here or another pane ends it. */
+    private val elsewhere = MutableStateFlow(false)
+
     val host: StateFlow<HostState?> = (live?.rex?.state ?: flowOf(null))
         .stateIn(viewModelScope, SharingStarted.Eagerly, live?.rex?.state?.value)
 
-    private val link: StateFlow<Link?> = combine(host, graph.tailnet.status, graph.localNetwork.granted) { st, tailnet, local ->
-        live?.let { hostLink(app.resources, it.host, st, Access(tailnet, local)) }
+    /** Only what the screen shows of the host, so events elsewhere on the host do not redraw it. */
+    val header: StateFlow<PaneHeader> = combine(host, _target) { st, target -> headerOf(st, target) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, headerOf(host.value, _target.value))
+
+    private val link: StateFlow<Link?> = combine(host, graph.tailnet.status, graph.localNetwork.granted, graph.localNetwork.names) { st, tailnet, local, names ->
+        live?.let { hostLink(app.resources, it.host, st, Access(tailnet, local, names)) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val loaded = MutableStateFlow(0L)
@@ -100,8 +124,9 @@ class TerminalViewModel(
     /** When the stream last moved forward, on the [SystemClock.elapsedRealtime] clock. */
     @Volatile private var lastProgress = SystemClock.elapsedRealtime()
 
-    val view: StateFlow<PaneView> = combine(_status, _session, link, loaded, stalled) { status, session, link, bytes, stalled ->
-        paneView(status, session != null, link, bytes, stalled)
+    val view: StateFlow<PaneView> = combine(combine(_status, elsewhere) { s, e -> s to e }, _session, link, loaded, stalled) {
+            (status, takenElsewhere), session, link, bytes, stalled ->
+        paneView(status, takenElsewhere, session != null, link, bytes, stalled)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, PaneView.Loading(connecting = false, bytes = 0))
 
     /** The stream is read, and emulators are made and fed, on this one thread, in stream order. */
@@ -112,13 +137,29 @@ class TerminalViewModel(
     private var input: PaneInput? = null
     @Volatile private var theme: PaneTheme? = null
     private var visible = true
-    private val feeding = ThreadLocal<Boolean>()
+
+    /** Ends the stream once the screen has been out of sight for [HIDDEN_STREAM_MS]. */
+    private var pauseJob: Job? = null
+    /** The stream ended because the screen was out of sight, so it starts again when the screen shows. */
+    private var paused = false
+
+    /** The grid the terminal last sent to Rex, so the next emulator can start at that size. */
+    @Volatile private var grid: Grid? = null
+
+    private class Grid(val columns: Int, val rows: Int, val cellWidth: Int, val cellHeight: Int)
+
+    /**
+     * Output that arrived before this moment, on the [System.nanoTime] clock, is already in the screen Rex drew for
+     * the emulator. Read and written on [terminalThread].
+     */
+    private var drawnUntil = Long.MIN_VALUE
 
     // Ownership, changed on the main thread only: the pane this phone should size now, the pane Rex
-    // last confirmed as this phone's, and the view revision at that moment.
+    // last confirmed as this phone's, the view revision at that moment, and the client that owns it.
     private var wanted: String? = null
     private var owned: String? = null
     private var ownedSince = -1L
+    private var ownedBy: String? = null
     private var syncing = false
 
     init {
@@ -148,42 +189,57 @@ class TerminalViewModel(
             }
         }
         viewModelScope.launch {
-            // Another device took the pane this phone sized: stop sizing it and say so.
+            val rex = live?.rex ?: return@launch
             host.collect { st ->
                 val pane = owned ?: return@collect
+                val clientId = rex.connectedClientId() ?: return@collect
+                if (clientId != ownedBy) {
+                    // A new client owns nothing: Rex passed this phone's panes on when the old one left.
+                    owned = null
+                    ownedSince = -1
+                    ownedBy = null
+                    if (visible && _target.value?.blockId == pane && _status.value == PaneStatus.Live && !elsewhere.value) want(pane)
+                    return@collect
+                }
+                // Another device took the pane this phone sized: stop sizing it and say so.
                 val view = st?.session(sessionId)?.view ?: return@collect
                 if (view.revision <= ownedSince) return@collect
                 val owner = view.tabs.flatMap { it.blocks }.firstOrNull { it.id == pane }?.owner
-                if (owner != null && owner != st.clientId) {
+                if (owner != null && owner != clientId) {
                     owned = null
+                    ownedBy = null
                     wanted = null
-                    if (_target.value?.blockId == pane) _status.value = PaneStatus.ElsewhereOwned
+                    if (_target.value?.blockId == pane) elsewhere.value = true
                 }
             }
         }
         viewModelScope.launch {
             // Time spent waiting for the computer does not count against the stream.
-            link.distinctUntilChanged { a, b -> (a is Link.Online) == (b is Link.Online) }.collect {
-                if (it is Link.Online) lastProgress = SystemClock.elapsedRealtime()
-            }
-        }
-        viewModelScope.launch {
-            while (true) {
-                delay(1_000)
-                val waiting = _status.value == PaneStatus.Opening || _status.value == PaneStatus.Reconnecting
-                stalled.value = waiting && link.value is Link.Online &&
-                    SystemClock.elapsedRealtime() - lastProgress > STALL_MS
-            }
+            val online = link.map { it is Link.Online }.distinctUntilChanged().onEach { if (it) lastProgress = SystemClock.elapsedRealtime() }
+            combine(_status, online) { status, isOnline -> isOnline && (status == PaneStatus.Opening || status == PaneStatus.Reconnecting) }
+                .distinctUntilChanged()
+                .collectLatest { waiting ->
+                    if (!waiting) {
+                        stalled.value = false
+                        return@collectLatest
+                    }
+                    while (true) {
+                        val left = lastProgress + STALL_MS - SystemClock.elapsedRealtime()
+                        stalled.value = left <= 0
+                        // Once stalled, look again each second, so the pane comes back as soon as anything arrives.
+                        delay(if (left > 0) left else 1_000)
+                    }
+                }
         }
     }
 
-    private fun paneView(status: PaneStatus, hasScreen: Boolean, link: Link?, bytes: Long, stalled: Boolean): PaneView {
+    private fun paneView(status: PaneStatus, takenElsewhere: Boolean, hasScreen: Boolean, link: Link?, bytes: Long, stalled: Boolean): PaneView {
         val r = getApplication<Application>().resources
-        return when (status) {
-            PaneStatus.Unavailable -> PaneView.Unavailable
-            PaneStatus.Closed -> PaneView.Closed
-            PaneStatus.ElsewhereOwned -> PaneView.ElsewhereOwned
-            PaneStatus.Opening, PaneStatus.Live, PaneStatus.Reconnecting -> when (link) {
+        return when {
+            status == PaneStatus.Unavailable -> PaneView.Unavailable
+            status == PaneStatus.Closed -> PaneView.Closed
+            takenElsewhere -> PaneView.ElsewhereOwned
+            else -> when (link) {
                 is Link.Offline -> PaneView.Failed(link.message, link.retryable)
                 is Link.Blocked -> PaneView.Failed(
                     r.getString(if (link.need == Need.TailscaleSignIn) R.string.terminal_needs_tailnet else R.string.terminal_needs_local_network),
@@ -200,17 +256,45 @@ class TerminalViewModel(
         }
     }
 
+    private fun headerOf(st: HostState?, target: PaneTarget?): PaneHeader {
+        val session = st?.session(sessionId)
+        val sessionName = session?.info?.label.orEmpty()
+        val window = window(st, target?.windowId)
+        val blocks = st?.blocks.orEmpty()
+        val facts = target?.blockId?.let { blocks[it] }
+        return PaneHeader(
+            sessionName = sessionName,
+            tab = window?.let { tabRow(getApplication<Application>().resources, hostId, sessionId, sessionName, it, 0, blocks, target?.blockId) },
+            subtitle = listOfNotNull(session?.info?.label, shortPath(facts?.cwd, facts?.process?.home)).joinToString("  ·  "),
+            panes = window?.blocks.orEmpty().filter { it.isTerminal && it.id != null }.map { block ->
+                val f = blocks[block.id]
+                PaneChip(
+                    id = block.id!!,
+                    name = f?.status?.values?.firstNotNullOfOrNull { it.effectiveApp ?: it.app }?.let(::appName) ?: f?.programName ?: "…",
+                    label = block.label,
+                    waiting = f?.waiting != null,
+                )
+            },
+        )
+    }
+
     fun window(st: HostState?, windowId: String? = _target.value?.windowId): WindowView? =
         st?.session(sessionId)?.view?.tabs?.firstOrNull { it.id == windowId }
 
     fun show(target: PaneTarget, restart: Boolean = false) {
         val rex = live?.rex ?: return
         if (!restart && _target.value == target && streamJob?.isActive == true) return
-        want(null)
+        val samePane = _target.value?.blockId == target.blockId
+        // Opening the same pane again keeps it this phone's, so its size does not go to the desktop and back.
+        if (!samePane) {
+            want(null)
+            elsewhere.value = false
+        }
         streamJob?.cancel()
-        input?.close()
+        val oldInput = input
+        oldInput?.close()
         val old = _session.value
-        if (old != null && _target.value?.blockId != target.blockId) {
+        if (old != null && !samePane) {
             // Another pane's screen must not show while this one loads.
             _session.value = null
             old.close()
@@ -220,9 +304,12 @@ class TerminalViewModel(
         loaded.value = 0
         stalled.value = false
         lastProgress = SystemClock.elapsedRealtime()
-        val paneInput = PaneInput(rex, sessionId, target.blockId, viewModelScope)
+        // Keys still going out to this pane, such as the rest of a paste, go before new ones.
+        val paneInput = PaneInput(rex, sessionId, target.blockId, viewModelScope, before = oldInput.takeIf { samePane })
         input = paneInput
         theme?.let(paneInput::setTheme)
+        // Keys typed on the last screen while the stream comes back go out on the new connection.
+        if (samePane) old?.transport = transport(target, paneInput)
         streamJob = viewModelScope.launch(terminalThread) {
             TerminalStream(rex, sessionId, target.blockId).events().collect { e -> onStreamEvent(e, target, paneInput) }
         }
@@ -234,70 +321,73 @@ class TerminalViewModel(
         }
         when (e) {
             is TerminalStream.Event.Loading -> loaded.value = e.bytes
-            is TerminalStream.Event.Started -> {
-                val snapshot = e.snapshot
-                val restored = snapshot?.let { GhosttyTerminalSession.restore(it, options()) }
-                if (snapshot != null && restored == null) {
-                    Log.w(TAG, "snapshot did not restore, ${snapshot.size} bytes; redrawing from the screen")
-                }
-                val session = restored ?: GhosttyTerminalSession(options())
-                session.transport = transport(target, paneInput)
-                // A new data connection can come from a new client, which starts with Rex's colours.
-                theme?.let(paneInput::setTheme)
-                try {
-                    withContext(Dispatchers.Main) {
-                        val old = _session.value
-                        _session.value = session
-                        old?.close()
-                    }
-                } catch (c: CancellationException) {
-                    // Another pane was picked before this one could show.
-                    session.close()
-                    throw c
-                }
-                if (restored == null) redraw(session, target)
-                loaded.value = 0
-                _status.value = PaneStatus.Live
-            }
-            is TerminalStream.Event.Output -> feed(e.bytes)
+            is TerminalStream.Event.Started -> start(e.snapshot, target, paneInput)
+            is TerminalStream.Event.Output -> if (e.receivedAt >= drawnUntil) feed(e.bytes)
             is TerminalStream.Event.Resize, is TerminalStream.Event.Exited -> Unit
-            TerminalStream.Event.Interrupted -> _status.value = PaneStatus.Reconnecting
-            TerminalStream.Event.Resumed -> if (_status.value == PaneStatus.Reconnecting) _status.value = PaneStatus.Live
+            TerminalStream.Event.Interrupted -> {
+                // A stream that drops after a quiet time gets the whole stall time to come back.
+                if (_status.value == PaneStatus.Live) lastProgress = SystemClock.elapsedRealtime()
+                _status.value = PaneStatus.Reconnecting
+            }
+            TerminalStream.Event.Resumed -> if (_status.value == PaneStatus.Reconnecting) {
+                _status.value = PaneStatus.Live
+                // The screen may have released the pane while the stream was down.
+                viewModelScope.launch(Dispatchers.Main) {
+                    if (visible && _target.value == target && !elsewhere.value) want(target.blockId)
+                }
+            }
             TerminalStream.Event.Closed -> _status.value = PaneStatus.Closed
         }
     }
 
-    private fun feed(bytes: ByteArray) {
-        val session = _session.value ?: return
-        feeding.set(true)
-        try {
-            session.feedOutput(bytes)
-        } finally {
-            feeding.set(false)
+    private suspend fun start(snapshot: ByteArray?, target: PaneTarget, paneInput: PaneInput) {
+        val restored = snapshot?.let { GhosttyTerminalSession.restore(it, options()) }
+        if (snapshot != null && restored == null) {
+            Log.w(TAG, "snapshot did not restore, ${snapshot.size} bytes; redrawing from the screen")
         }
+        drawnUntil = Long.MIN_VALUE
+        val session = restored ?: redrawn(target)
+        var swapped = false
+        try {
+            // Rewrapping a long scrollback to the phone's grid takes a while; doing it here, before the
+            // screen shows, keeps it off the main thread.
+            grid?.let { session.resize(it.columns, it.rows, it.cellWidth, it.cellHeight) }
+            session.transport = transport(target, paneInput)
+            // A new data connection can come from a new client, which starts with Rex's colours.
+            theme?.let(paneInput::setTheme)
+            withContext(Dispatchers.Main) {
+                val old = _session.value
+                _session.value = session
+                old?.close()
+                swapped = true
+            }
+        } catch (c: CancellationException) {
+            // Another pane was picked before this one could show.
+            if (!swapped) session.close()
+            throw c
+        }
+        loaded.value = 0
+        _status.value = PaneStatus.Live
     }
 
-    /** The screen as escape sequences, for a snapshot this build cannot read. */
-    private suspend fun redraw(session: GhosttyTerminalSession, target: PaneTarget) {
-        val rex = live?.rex ?: return
-        val reply = runCatching {
-            rex.client.callBlock(sessionId, target.blockId, "format", buildJsonObject {
-                put("format", "vt")
-                put("extra_cursor", true)
-                put("extra_modes", true)
-                put("extra_palette", true)
-                put("extra_style", true)
-                put("extra_scrolling_region", true)
-                put("extra_tabstops", true)
-                put("extra_charsets", true)
-                put("extra_keyboard", true)
-                put("extra_kitty_keyboard", true)
-                put("extra_pwd", true)
-                put("max_bytes", 960 * 1024)
-            })
-        }.getOrNull() ?: return
-        val content = reply["content"]?.jsonPrimitive?.contentOrNull ?: return
-        if (_session.value === session) feed(content.toByteArray())
+    /**
+     * An emulator with the screen Rex draws as escape sequences, for a snapshot this build cannot read. It starts at
+     * the pane's size on Rex, so rows and the cursor land where Rex has them. Blank if Rex cannot send the screen.
+     */
+    private suspend fun redrawn(target: PaneTarget): GhosttyTerminalSession {
+        val client = live?.rex?.client ?: return GhosttyTerminalSession(options())
+        val screen = readScreenDump(
+            call = { method, args -> client.callBlock(sessionId, target.blockId, method, args) },
+            onProgress = { lastProgress = SystemClock.elapsedRealtime() },
+        ) ?: return GhosttyTerminalSession(options())
+        val session = GhosttyTerminalSession(options(screen.columns, screen.rows))
+        screen.parts.forEach { session.feedOutput(it) }
+        drawnUntil = screen.drawnAt
+        return session
+    }
+
+    private fun feed(bytes: ByteArray) {
+        _session.value?.feedOutput(bytes)
     }
 
     fun setTheme(theme: PaneTheme) {
@@ -305,20 +395,26 @@ class TerminalViewModel(
         input?.setTheme(theme)
     }
 
-    private fun options() = GhosttyTerminalSession.Options(reportedVersion = "Rax", terminfoName = "xterm-256color")
+    // Rex's own terminal answers the program's queries and sends it the reports it asks for, so the
+    // emulator here only passes on what the user types.
+    private fun options(columns: Int = 80, rows: Int = 24) = GhosttyTerminalSession.Options(
+        columns = columns,
+        rows = rows,
+        reportedVersion = "Rax",
+        terminfoName = "xterm-256color",
+        repliesToProgram = false,
+    )
 
     private fun transport(target: PaneTarget, paneInput: PaneInput) = object : GhosttyTerminalSession.Transport {
-        override fun sendInput(data: ByteArray) {
-            // The emulator answers terminal queries while it reads output; Rex's own terminal already
-            // answers them, so only what the user typed goes back.
-            if (feeding.get() == true) return
-            paneInput.send(data)
-        }
+        override fun sendInput(data: ByteArray) = paneInput.send(data)
 
         override fun sendResize(columns: Int, rows: Int, widthPixels: Int, heightPixels: Int) {
-            paneInput.resize(columns, rows, widthPixels / columns.coerceAtLeast(1), heightPixels / rows.coerceAtLeast(1))
+            val cellWidth = widthPixels / columns.coerceAtLeast(1)
+            val cellHeight = heightPixels / rows.coerceAtLeast(1)
+            grid = Grid(columns, rows, cellWidth, cellHeight)
+            paneInput.resize(columns, rows, cellWidth, cellHeight)
             viewModelScope.launch(Dispatchers.Main) {
-                if (visible && _target.value == target && _status.value != PaneStatus.ElsewhereOwned) want(target.blockId)
+                if (visible && _target.value == target && !elsewhere.value) want(target.blockId)
             }
         }
 
@@ -328,7 +424,7 @@ class TerminalViewModel(
     /** Reconnects to the computer if needed and opens the pane's stream again. */
     fun retry() {
         val l = live ?: return
-        if (l.host.tailnet) graph.scope.launch { graph.tailnet.start() }
+        if (l.host.tailnet) graph.scope.launch { graph.tailnet.retry() }
         graph.connections.retry(hostId)
         val target = _target.value ?: return
         if (_status.value != PaneStatus.Live) show(target, restart = true)
@@ -337,19 +433,35 @@ class TerminalViewModel(
     /** Asks for the pane back from the device that took it. */
     fun useHere() {
         val target = _target.value ?: return
-        _status.value = PaneStatus.Live
+        elsewhere.value = false
         want(target.blockId)
     }
 
     fun onVisible() {
         visible = true
+        pauseJob?.cancel()
+        pauseJob = null
         val target = _target.value ?: return
-        if (_status.value == PaneStatus.Live) want(target.blockId)
+        if (paused) {
+            paused = false
+            show(target, restart = true)
+            return
+        }
+        if (_status.value == PaneStatus.Live && !elsewhere.value) want(target.blockId)
     }
 
     fun onHidden() {
         visible = false
         want(null)
+        // Output that nobody sees costs data and battery. Alerts need only the control connection.
+        pauseJob?.cancel()
+        pauseJob = viewModelScope.launch {
+            delay(HIDDEN_STREAM_MS)
+            if (streamJob?.isActive == true) {
+                streamJob?.cancel()
+                paused = true
+            }
+        }
     }
 
     /**
@@ -371,24 +483,52 @@ class TerminalViewModel(
 
     private suspend fun syncOwnership() {
         val rex = live?.rex ?: return
-        while (true) {
+        // A pane whose take may have reached Rex, though its answer was lost.
+        var unsure: String? = null
+        while (wanted != owned || unsure != null) {
+            // While the connection is down, or a new one has not attached the session yet, wait for it:
+            // when it resumes, Rex gives this phone back the panes it owned, so a release that could
+            // not go out must still be sent.
+            withTimeoutOrNull(RESUME_WINDOW_MS) { rex.state.first { it.canCall(sessionId) } } ?: return
             val want = wanted
             val have = owned
-            if (want == have) return
-            // While the connection is down, wait for it: when it resumes, Rex gives this phone back
-            // the panes it owned, so a release that could not go out must still be sent.
-            withTimeoutOrNull(RESUME_WINDOW_MS) { rex.client.state.first { it is RexClient.State.Connected } } ?: return
-            if (have != null) {
-                val released = runCatching { rex.release(sessionId, have) }
-                if (released.isSuccess || rex.client.state.value is RexClient.State.Connected) owned = null
-            } else if (want != null) {
+            val release = have?.takeIf { it != want } ?: unsure?.takeIf { it != want }
+            if (release != null) {
+                val failure = runCatching { rex.release(sessionId, release) }.exceptionOrNull()
+                if (failure?.lostReply() == true) {
+                    delay(RETRY_MS)
+                    continue
+                }
+                // Done, or refused by Rex, which a second try does not change.
+                if (release == have) {
+                    owned = null
+                    ownedBy = null
+                }
+                if (release == unsure) unsure = null
+            } else if (want != null && have == null) {
                 val revision = rex.state.value.session(sessionId)?.view?.revision ?: -1
-                if (runCatching { rex.take(sessionId, want) }.isFailure) return
+                val clientId = rex.connectedClientId()
+                val failure = runCatching { rex.take(sessionId, want) }.exceptionOrNull()
+                if (failure?.lostReply() == true) {
+                    // Taking a pane this client already owns changes nothing, so the take goes out again.
+                    unsure = want
+                    delay(RETRY_MS)
+                    continue
+                }
+                unsure = null
+                if (failure != null) return
                 owned = want
                 ownedSince = revision
+                ownedBy = clientId
+            } else {
+                unsure = null
             }
         }
     }
+
+    private fun Throwable.lostReply() = this is RexException && replyLost
+
+    private fun RexHost.connectedClientId(): String? = (client.state.value as? RexClient.State.Connected)?.welcome?.clientId
 
     override fun onCleared() {
         want(null)
@@ -405,7 +545,13 @@ class TerminalViewModel(
         /** A little longer than Rex keeps a dropped client. */
         const val RESUME_WINDOW_MS = 90_000L
 
+        /** How long to wait before an ownership change whose answer was lost goes out again. */
+        const val RETRY_MS = 1_000L
+
         /** How long a pane may load or reconnect with nothing arriving before Rax calls it failed. */
         const val STALL_MS = 20_000L
+
+        /** How long the stream of a screen that is out of sight stays open, like the control connection's grace period. */
+        const val HIDDEN_STREAM_MS = 30_000L
     }
 }

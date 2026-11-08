@@ -45,7 +45,8 @@ internal object GhosttyVt {
 
     external fun nativeWrite(handle: Long, data: ByteArray, offset: Int, length: Int): ByteArray?
 
-    external fun nativeResize(handle: Long, cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int)
+    /** Returns the in-band size report (mode 2048) for the new size, if the program asked for one. */
+    external fun nativeResize(handle: Long, cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int): ByteArray?
 
     external fun nativeTakeEventFlags(handle: Long): Int
 
@@ -84,6 +85,7 @@ internal object GhosttyVt {
     const val VIEWPORT_ALTERNATE_SCREEN = 1
     const val VIEWPORT_MOUSE_TRACKING = 2
     const val VIEWPORT_SYNC_OUTPUT = 4
+    const val VIEWPORT_SELECTION = 8
 
     external fun nativeViewportState(handle: Long): Int
 
@@ -141,9 +143,13 @@ internal object GhosttyVt {
         row: Int,
     ): Boolean
 
+    /** `[firstColumn, firstRow, lastColumn, lastRow]` in viewport cells, or null without a selection. */
+    external fun nativeSelectionBounds(handle: Long): IntArray?
+
     external fun nativeClearSelection(handle: Long)
 
-    external fun nativeSelectionText(handle: Long): ByteArray?
+    /** Returns null without a selection, or when [maxBytes] is not negative and the text is longer. */
+    external fun nativeSelectionText(handle: Long, maxBytes: Int): ByteArray?
 
     external fun nativeViewportText(handle: Long): ByteArray?
 

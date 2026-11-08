@@ -10,8 +10,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.uditkaro.rax.theme.TerminalColors
 import io.github.xchacha20_poly1305.libghostty.GhosttyTerminalSession
@@ -37,8 +37,10 @@ fun TerminalPreview(font: FontFamily, fontSize: Float, colors: TerminalColors, m
     state.showImeOnTap = false
     state.urlDetectionEnabled = false
 
-    // Three rows at the line height the renderer uses, about 1.25 times the font size.
-    val height = (fontSize * 1.32f * 3f).dp
+    // Three of the renderer's rows, estimated until it has measured the font.
+    val height = with(LocalDensity.current) {
+        state.cellSize?.let { (it.heightPx * 3).toDp() } ?: (fontSize * 1.32f * 3f).sp.toDp()
+    }
     Box(modifier.fillMaxWidth().height(height)) {
         GhosttyTerminal(
             session = session,

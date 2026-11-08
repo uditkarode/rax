@@ -21,7 +21,11 @@ sealed interface TailnetStatus {
         val addresses: List<InetAddress>,
     ) : TailnetStatus
 
-    data class Error(val message: String) : TailnetStatus
+    data class Error(
+        val message: String,
+        /** The tailnet requires network flow logs, which need the log upload that the node turns off. */
+        val loggingRequired: Boolean = false,
+    ) : TailnetStatus
 }
 
 data class TailnetPeer(

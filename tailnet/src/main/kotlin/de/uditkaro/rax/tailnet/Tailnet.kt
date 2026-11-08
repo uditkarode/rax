@@ -2,6 +2,7 @@ package de.uditkaro.rax.tailnet
 
 import android.content.Context
 import android.os.Build
+import android.system.Os
 import android.util.Log
 import java.io.File
 import java.net.Proxy
@@ -34,6 +35,7 @@ class Tailnet internal constructor(
     private val node: Node,
     private val network: NetworkWatcher,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val listInterfaces: () -> String = ::interfacesJson,
 ) {
     private val _status = MutableStateFlow<TailnetStatus>(TailnetStatus.Stopped)
     val status: StateFlow<TailnetStatus> = _status.asStateFlow()
@@ -51,23 +53,32 @@ class Tailnet internal constructor(
 
     private val lifecycle = Mutex()
     @Volatile private var started = false
+    private var hostname = defaultHostname
 
     // The first Go call loads the native library and starts the Go runtime, so
     // it happens in start(), off the main thread.
     private val nodeInit = lazy {
+        // Go calls these from its own threads. An exception that returns to Go stays pending on
+        // that thread and breaks its next call into Java, so none may escape.
         node.init(object : NodeHost {
-            override fun interfaces(): String = interfacesJson()
+            @Volatile private var lastInterfaces = "[]"
+
+            override fun interfaces(): String = try {
+                listInterfaces().also { lastInterfaces = it }
+            } catch (e: Throwable) {
+                Log.e(TAG, "listing the network interfaces failed", e)
+                lastInterfaces
+            }
 
             override fun onStatus(json: String) {
-                if (!started) return
-                val state = try {
-                    parseStatus(json)
-                } catch (e: Exception) {
+                try {
+                    if (!started) return
+                    val state = parseStatus(json)
+                    _status.value = state.status
+                    _peers.value = state.peers
+                } catch (e: Throwable) {
                     Log.e(TAG, "bad status from the node: $json", e)
-                    return
                 }
-                _status.value = state.status
-                _peers.value = state.peers
             }
         })
     }
@@ -77,20 +88,35 @@ class Tailnet internal constructor(
      * progress, and any failure, show up in [status]. Does nothing if started.
      */
     suspend fun start(hostname: String = defaultHostname) = withContext(dispatcher) {
+        lifecycle.withLock { startLocked(hostname) }
+    }
+
+    /**
+     * Starts the node, or starts it again if it stopped with an error. The
+     * node does not leave [TailnetStatus.Error] by itself, so retry actions
+     * call this.
+     */
+    suspend fun retry() = withContext(dispatcher) {
         lifecycle.withLock {
-            if (started) return@withLock
-            nodeInit.value
-            started = true
-            _status.value = TailnetStatus.Starting
-            network.start(node::networkChanged)
-            try {
-                node.start(stateDir.path, hostname, deviceModel, osVersion)
-            } catch (e: Exception) {
-                Log.e(TAG, "starting the node failed", e)
-                network.stop()
-                started = false
-                _status.value = TailnetStatus.Error(e.message ?: e.toString())
-            }
+            if (started && _status.value is TailnetStatus.Error) stopLocked()
+            startLocked(hostname)
+        }
+    }
+
+    private fun startLocked(hostname: String) {
+        if (started) return
+        nodeInit.value
+        this.hostname = hostname
+        started = true
+        _status.value = TailnetStatus.Starting
+        network.start(node::networkChanged)
+        try {
+            node.start(stateDir.path, hostname, deviceModel, osVersion)
+        } catch (e: Exception) {
+            Log.e(TAG, "starting the node failed", e)
+            network.stop()
+            started = false
+            _status.value = TailnetStatus.Error(e.message ?: e.toString())
         }
     }
 
@@ -101,19 +127,24 @@ class Tailnet internal constructor(
      */
     suspend fun login() = call("login") { node.login() }
 
-    /** Logs out and removes this device's keys. [status] then shows a new login URL. */
+    /**
+     * Logs out and removes this device's keys. [status] then shows a new login URL. If Tailscale
+     * cannot be told, the node keeps its keys and stays signed in, and this throws.
+     */
     suspend fun logout() = call("logout") { node.logout() }
 
     /** Stops the node. Its keys stay, so the next [start] needs no login. */
     suspend fun stop() = withContext(dispatcher) {
-        lifecycle.withLock {
-            if (!started) return@withLock
-            node.stop()
-            network.stop()
-            started = false
-            _status.value = TailnetStatus.Stopped
-            _peers.value = emptyList()
-        }
+        lifecycle.withLock { stopLocked() }
+    }
+
+    private fun stopLocked() {
+        if (!started) return
+        node.stop()
+        network.stop()
+        started = false
+        _status.value = TailnetStatus.Stopped
+        _peers.value = emptyList()
     }
 
     /**
@@ -144,12 +175,18 @@ class Tailnet internal constructor(
 
         @Volatile private var instance: Tailnet? = null
 
+        /**
+         * Returns the node of this process. The first call must come before the app starts other
+         * threads, see [nodeEnvironment].
+         */
         fun get(context: Context): Tailnet =
             instance ?: synchronized(this) {
                 instance ?: run {
                     val app = context.applicationContext
+                    val stateDir = File(app.noBackupFilesDir, "tailnet")
+                    for ((name, value) in nodeEnvironment(stateDir)) Os.setenv(name, value, false)
                     Tailnet(
-                        stateDir = File(app.noBackupFilesDir, "tailnet"),
+                        stateDir = stateDir,
                         defaultHostname = hostnameFor(Build.MODEL),
                         deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
                         osVersion = Build.VERSION.RELEASE,
@@ -160,6 +197,22 @@ class Tailnet internal constructor(
             }
     }
 }
+
+/**
+ * The environment variables that the Go node sets when it starts or loads. Setting a variable that
+ * exists only replaces its value, but adding one can move the C environment array while another
+ * thread reads it, for example in `getaddrinfo`. So the app creates them all before it starts
+ * other threads, and the node's own setenv calls later only replace values.
+ */
+internal fun nodeEnvironment(stateDir: File, apexCerts: File = File(APEX_CERTS)): Map<String, String> = buildMap {
+    put("TS_LOGS_DIR", stateDir.path)
+    put("HOME", stateDir.path)
+    put("TS_NO_LOGS_NO_SUPPORT", "true")
+    if (apexCerts.isDirectory) put("SSL_CERT_DIR", apexCerts.path)
+}
+
+/** The CA roots that Android 14 and later update, see go/certs_android.go. */
+private const val APEX_CERTS = "/apex/com.android.conscrypt/cacerts"
 
 /** Returns `rax-<model>` as a valid DNS label, for example `rax-pixel-9`. */
 internal fun hostnameFor(model: String): String {

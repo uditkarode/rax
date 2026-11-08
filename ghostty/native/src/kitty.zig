@@ -25,8 +25,10 @@ pub const Placement = extern struct {
     pub const longs = @sizeOf(Placement) / @sizeOf(i64);
 };
 
-/// Images larger than this are not handed to the renderer.
-const max_image_pixels = 100 * 1000 * 1000;
+/// Images larger than this are not handed to the renderer. It matches the
+/// renderer's image cache (KittyImageCache.MAX_PIXELS), which drops a larger
+/// image as soon as it is added.
+const max_image_pixels = 16 * 1024 * 1024;
 
 /// Collects the placements visible in the viewport, ordered by z. Virtual
 /// (unicode placeholder) placements and those relative to them come from

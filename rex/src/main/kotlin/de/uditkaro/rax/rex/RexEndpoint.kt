@@ -10,7 +10,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * - `host:port` uses HTTPS on 443 and plain HTTP on any other port;
  * - a bare name uses HTTPS on 443 when it is reached through Tailscale or is a MagicDNS name, the
  *   way Rex's built-in Tailscale serves, and plain HTTP on 7297 otherwise, the port Rex suggests
- *   for `--extra-listen`.
+ *   for `--extra-listen`. A bare IP through Tailscale also uses plain HTTP on 7297.
+ *
+ * A path after the host, such as `/api/control`, is dropped.
  */
 class RexEndpoint private constructor(val base: HttpUrl) {
 
@@ -40,7 +42,17 @@ class RexEndpoint private constructor(val base: HttpUrl) {
             data class Invalid(val reason: Reason) : Parsed
         }
 
-        enum class Reason { Empty, BadAddress, BadScheme }
+        enum class Reason {
+            Empty,
+            BadAddress,
+            BadScheme,
+
+            /**
+             * A name without a dot, through Tailscale and without a port. Rex's built-in Tailscale has a
+             * certificate only for the full `.ts.net` name, so the connection could not be secure.
+             */
+            ShortTailnetName,
+        }
 
         fun parse(input: String, tailnet: Boolean): Parsed {
             val text = input.trim().trimEnd('/')
@@ -48,16 +60,17 @@ class RexEndpoint private constructor(val base: HttpUrl) {
             val scheme = text.substringBefore("://", "").lowercase()
             val url = when (scheme) {
                 "" -> {
-                    val bareV6 = text.count { it == ':' } >= 2 && !text.startsWith("[")
-                    val hasPort = !bareV6 && Regex(":\\d+$").containsMatchIn(text) && !text.startsWith("[")
-                    val bracketPort = Regex("^\\[[^]]+]:\\d+$").matches(text)
+                    val (host, port) = authority(text) ?: return Parsed.Invalid(Reason.BadAddress)
+                    val h = if (':' in host) "[$host]" else host
                     when {
-                        hasPort || bracketPort -> {
-                            val port = text.substringAfterLast(':').toIntOrNull()
-                            if (port == 443) "https://$text" else "http://$text"
-                        }
-                        tailnet || text.lowercase().endsWith(".ts.net") -> "https://$text"
-                        else -> "http://${bracketIfV6(text)}:$DEFAULT_PORT"
+                        port != null -> "${if (port == 443) "https" else "http"}://$h:$port"
+                        host.lowercase().endsWith(".ts.net") -> "https://$h"
+                        // No certificate names an IP, so a tailnet IP means the computer's own
+                        // Tailscale, where Rex listens on its usual port.
+                        tailnet && isIpLiteral(host) -> "http://$h:$DEFAULT_PORT"
+                        tailnet && '.' !in host -> return Parsed.Invalid(Reason.ShortTailnetName)
+                        tailnet -> "https://$h"
+                        else -> "http://$h:$DEFAULT_PORT"
                     }
                 }
                 "http", "https" -> text
@@ -71,6 +84,34 @@ class RexEndpoint private constructor(val base: HttpUrl) {
             return Parsed.Ok(RexEndpoint(parsed.newBuilder().encodedPath("/").query(null).fragment(null).build()))
         }
 
-        private fun bracketIfV6(host: String) = if (host.count { it == ':' } >= 2) "[$host]" else host
+        /** The host in what the user typed, as typed and without brackets, or null if there is none. */
+        fun hostOf(input: String): String? = authority(input.trim().substringAfter("://"))?.first
+
+        /**
+         * Host and port of `host[:port][/path]`, where an IPv6 host is either in brackets or bare. A
+         * bare IPv6 address has no port, since its last group could not be told apart from one.
+         */
+        private fun authority(text: String): Pair<String, Int?>? {
+            val a = text.substringBefore('/').substringBefore('?').substringBefore('#')
+            val (host, port) = when {
+                a.startsWith("[") -> {
+                    val end = a.indexOf(']')
+                    if (end < 0) return null
+                    val rest = a.substring(end + 1)
+                    a.substring(1, end) to when {
+                        rest.isEmpty() -> null
+                        rest.startsWith(":") -> rest.drop(1).toIntOrNull() ?: return null
+                        else -> return null
+                    }
+                }
+                a.count { it == ':' } >= 2 -> a to null
+                ':' in a -> a.substringBefore(':') to (a.substringAfter(':').toIntOrNull() ?: return null)
+                else -> a to null
+            }
+            return if (host.isEmpty()) null else host to port
+        }
+
+        /** Whether [host] is an IP address rather than a name. */
+        fun isIpLiteral(host: String) = ':' in host || host.all { it.isDigit() || it == '.' }
     }
 }

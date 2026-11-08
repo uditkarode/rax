@@ -56,7 +56,6 @@ private const val PUSH_MS = 380
 @Composable
 fun RaxNavigation(graph: AppGraph, system: SystemActions, pendingOpen: Screen.Terminal?, onPendingOpened: () -> Unit) {
     val backStack = rememberNavBackStack(Screen.Home)
-    val push: (Screen) -> Unit = { backStack.add(it) }
     val pop: () -> Unit = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) }
 
     if (pendingOpen != null) {
@@ -82,20 +81,36 @@ fun RaxNavigation(graph: AppGraph, system: SystemActions, pendingOpen: Screen.Te
         transitionSpec = { pushIn togetherWith pushOut },
         popTransitionSpec = { popIn togetherWith popOut },
         predictivePopTransitionSpec = { popIn togetherWith popOut },
+        // A screen opens and closes screens only while it is on top. A screen that slides away still
+        // takes taps, and they must not act on the screen below it.
         entryProvider = entryProvider {
-            entry<Screen.Home> { HomeRoute(graph, system, push) }
+            entry<Screen.Home> { key -> HomeRoute(graph, system, open = { backStack.openFrom(key, it) }) }
             entry<Screen.Terminal> { key ->
                 val app = LocalContext.current.applicationContext as Application
                 val vm = viewModel { TerminalViewModel(app, key.hostId, key.sessionId, key.windowId, key.blockId) }
-                TerminalScreen(graph, vm, onBack = pop)
+                TerminalScreen(graph, vm, onBack = { backStack.close(key) })
             }
-            entry<Screen.HostEditor> { key -> HostEditorRoute(graph, system, key, onClose = pop) }
-            entry<Screen.Tailscale> { TailscaleScreen(graph, onBack = pop, open = push) }
-            entry<Screen.Settings> { SettingsScreen(graph, system, onBack = pop, open = push) }
-            entry<Screen.Theme> { ThemeScreen(graph, onBack = pop) }
-            entry<Screen.Font> { FontScreen(graph, onBack = pop) }
-            entry<Screen.Acknowledgements> { AcknowledgementsScreen(graph, onBack = pop, open = push) }
-            entry<Screen.License> { LicenseScreen(it.title, it.asset, onBack = pop) }
+            entry<Screen.HostEditor> { key -> HostEditorRoute(graph, system, key, onClose = { backStack.close(key) }) }
+            entry<Screen.Tailscale> { key ->
+                TailscaleScreen(graph, onBack = { backStack.close(key) }, open = { backStack.openFrom(key, it) })
+            }
+            entry<Screen.Settings> { key ->
+                SettingsScreen(graph, system, onBack = { backStack.close(key) }, open = { backStack.openFrom(key, it) })
+            }
+            entry<Screen.Theme> { key -> ThemeScreen(graph, onBack = { backStack.close(key) }) }
+            entry<Screen.Font> { key -> FontScreen(graph, onBack = { backStack.close(key) }) }
+            entry<Screen.Acknowledgements> { key ->
+                AcknowledgementsScreen(graph, onBack = { backStack.close(key) }, open = { backStack.openFrom(key, it) })
+            }
+            entry<Screen.License> { key -> LicenseScreen(key.title, key.asset, onBack = { backStack.close(key) }) }
         },
     )
+}
+
+private fun MutableList<NavKey>.openFrom(from: NavKey, screen: Screen) {
+    if (lastOrNull() == from) add(screen)
+}
+
+private fun MutableList<NavKey>.close(screen: NavKey) {
+    if (size > 1 && lastOrNull() == screen) removeAt(lastIndex)
 }

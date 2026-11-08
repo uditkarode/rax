@@ -217,8 +217,14 @@ private class TerminalInputNode(
         private fun flushEditable() {
             controller.setComposing(null)
             val content = editable ?: return
-            if (content.isNotEmpty()) controller.sendText(content.toString())
+            val text = content.toString()
             content.clear()
+            when {
+                text.isEmpty() -> {}
+                // Keyboards insert clipboard clips this way; with line breaks, they must not run line by line.
+                text.length > 1 && (text.contains('\n') || text.contains('\r')) -> controller.pasteText(text)
+                else -> controller.sendText(text)
+            }
         }
 
         override fun performEditorAction(actionCode: Int): Boolean {
@@ -240,11 +246,12 @@ private class AndroidKeyTranslator {
     fun translate(event: KeyEvent, action: GhosttyKeyAction): Result {
         val metaState = event.metaState
         // Ctrl and Meta never change the character; Alt does only as AltGr.
-        var unicodeMask = KeyEvent.META_CTRL_MASK or KeyEvent.META_META_MASK
-        if (metaState and KeyEvent.META_ALT_RIGHT_ON == 0) {
-            unicodeMask = unicodeMask or KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON
-        }
-        var unicode = event.getUnicodeChar(metaState and unicodeMask.inv())
+        val unicodeMask = KeyEvent.META_CTRL_MASK or KeyEvent.META_META_MASK
+        val rightAlt = metaState and KeyEvent.META_ALT_RIGHT_ON != 0
+        val withoutAlt = event.getUnicodeChar(metaState and (unicodeMask or KeyEvent.META_ALT_MASK).inv())
+        var unicode = if (rightAlt) event.getUnicodeChar(metaState and unicodeMask.inv()) else withoutAlt
+        // The layout used right Alt to type another character, so Alt is not also a modifier of the key.
+        val altGr = rightAlt && unicode != 0 && unicode != withoutAlt
         var composing = false
         if (unicode and KeyCharacterMap.COMBINING_ACCENT != 0) {
             if (action == GhosttyKeyAction.PRESS) combiningAccent = unicode and KeyCharacterMap.COMBINING_ACCENT_MASK
@@ -256,29 +263,33 @@ private class AndroidKeyTranslator {
             combiningAccent = 0
         }
         val text = if (unicode != 0) String(Character.toChars(unicode)) else null
-        return Result(mods(metaState), text, composing)
-    }
-
-    private fun mods(metaState: Int): Int {
-        var mods = 0
-        for ((meta, mod) in metaMods) {
-            if (metaState and meta != 0) mods = mods or mod
-        }
-        return mods
-    }
-
-    private companion object {
-        val metaMods = listOf(
-            KeyEvent.META_SHIFT_ON to GhosttyMods.SHIFT,
-            KeyEvent.META_SHIFT_RIGHT_ON to GhosttyMods.SHIFT_RIGHT,
-            KeyEvent.META_CTRL_ON to GhosttyMods.CTRL,
-            KeyEvent.META_CTRL_RIGHT_ON to GhosttyMods.CTRL_RIGHT,
-            KeyEvent.META_ALT_ON to GhosttyMods.ALT,
-            KeyEvent.META_ALT_RIGHT_ON to GhosttyMods.ALT_RIGHT,
-            KeyEvent.META_META_ON to GhosttyMods.SUPER,
-            KeyEvent.META_META_RIGHT_ON to GhosttyMods.SUPER_RIGHT,
-            KeyEvent.META_CAPS_LOCK_ON to GhosttyMods.CAPS_LOCK,
-            KeyEvent.META_NUM_LOCK_ON to GhosttyMods.NUM_LOCK,
-        )
+        return Result(keyMods(metaState, altGr), text, composing)
     }
 }
+
+/** [GhosttyMods] bits for an Android meta state. With [altGr], right Alt typed the character and is left out. */
+internal fun keyMods(metaState: Int, altGr: Boolean): Int {
+    var state = metaState
+    if (altGr) {
+        state = state and KeyEvent.META_ALT_RIGHT_ON.inv()
+        if (state and KeyEvent.META_ALT_LEFT_ON == 0) state = state and KeyEvent.META_ALT_ON.inv()
+    }
+    var mods = 0
+    for ((meta, mod) in metaMods) {
+        if (state and meta != 0) mods = mods or mod
+    }
+    return mods
+}
+
+private val metaMods = listOf(
+    KeyEvent.META_SHIFT_ON to GhosttyMods.SHIFT,
+    KeyEvent.META_SHIFT_RIGHT_ON to GhosttyMods.SHIFT_RIGHT,
+    KeyEvent.META_CTRL_ON to GhosttyMods.CTRL,
+    KeyEvent.META_CTRL_RIGHT_ON to GhosttyMods.CTRL_RIGHT,
+    KeyEvent.META_ALT_ON to GhosttyMods.ALT,
+    KeyEvent.META_ALT_RIGHT_ON to GhosttyMods.ALT_RIGHT,
+    KeyEvent.META_META_ON to GhosttyMods.SUPER,
+    KeyEvent.META_META_RIGHT_ON to GhosttyMods.SUPER_RIGHT,
+    KeyEvent.META_CAPS_LOCK_ON to GhosttyMods.CAPS_LOCK,
+    KeyEvent.META_NUM_LOCK_ON to GhosttyMods.NUM_LOCK,
+)

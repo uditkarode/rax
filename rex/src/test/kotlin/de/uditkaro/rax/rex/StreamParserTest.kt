@@ -74,10 +74,74 @@ class StreamParserTest {
     }
 
     @Test
-    fun snapshotEndWaitsForTheFinishRecord() {
+    fun snapshotEndsAfterTheFinishRecord() {
         val snap = fakeSnapshot()
-        assertNull(StreamParser.snapshotEnd(snap.copyOfRange(0, snap.size - 1)))
-        assertEquals(snap.size, StreamParser.snapshotEnd(snap + "x".toByteArray()))
-        assertEquals(0, StreamParser.snapshotEnd("not a snapshot".toByteArray()))
+        val parser = StreamParser(nonce)
+        assertTrue(parser.feed(snap.copyOfRange(0, snap.size - 1)).isEmpty())
+        val parts = parser.feed(snap.copyOfRange(snap.size - 1, snap.size) + "x".toByteArray())
+        assertArrayEquals(snap, (parts[0] as StreamPart.Snapshot).bytes)
+        assertEquals("x", output(parts))
+    }
+
+    @Test
+    fun unknownSnapshotVersionEndsAtRexsFirstMessage() {
+        val snap = fakeSnapshot().also { it[8] = 2 }
+        val parser = StreamParser(nonce)
+        assertTrue(parser.feed(snap).isEmpty())
+        val parts = parser.feed(rex("""{"type":"resize","cols":80,"rows":24}""") + "after".toByteArray())
+        assertNull((parts[0] as StreamPart.Snapshot).bytes)
+        assertEquals(StreamPart.Resize(80, 24, null), parts[1])
+        assertEquals("after", output(parts))
+    }
+
+    @Test
+    fun rexsFirstMessageIsFoundAmongBytesThatLookLikeIt() {
+        // Payload made of the message's own characters, partial messages and another nonce.
+        val junk = ("1;2;3;rex1;;\u001b_rex1;" + "\u001b_rex1;$nonce" + "\u001b_rex1;1$nonce;" + "_;x1e;").toByteArray()
+        for (pad in 0..40) {
+            val snap = "GHOSTSNP".toByteArray() + byteArrayOf(2, 0) + ByteArray(pad) { junk[it % junk.size] } + junk
+            val stream = snap + rex("""{"type":"resize","cols":10,"rows":5}""") + "out".toByteArray()
+            for (chunk in listOf(1, 7, 64, stream.size)) {
+                val parser = StreamParser(nonce)
+                val parts = stream.toList().chunked(chunk).flatMap { parser.feed(it.toByteArray()) }
+                assertNull("pad $pad chunk $chunk", (parts.single { it is StreamPart.Snapshot } as StreamPart.Snapshot).bytes)
+                assertTrue("pad $pad chunk $chunk", parts.contains(StreamPart.Resize(10, 5, null)))
+                assertEquals("pad $pad chunk $chunk", "out", output(parts))
+            }
+        }
+    }
+
+    @Test
+    fun recordTooLargeDoesNotThrow() {
+        val snap = "GHOSTSNP".toByteArray() + byteArrayOf(1, 0) +
+            ByteBuffer.allocate(10).order(ByteOrder.LITTLE_ENDIAN).putShort(1).putInt(-1).putInt(0).array()
+        val parts = StreamParser(nonce).feed(snap + rex("""{"type":"child_exited","exit_code":0}""") + "x".toByteArray())
+        assertNull((parts[0] as StreamPart.Snapshot).bytes)
+        assertEquals(StreamPart.Exited(0), parts[1])
+        assertEquals("x", output(parts))
+    }
+
+    @Test
+    fun misreadRecordLengthEndsAtRexsFirstMessage() {
+        // A record that claims 1 MiB, where Rex's message follows after a few bytes.
+        val snap = "GHOSTSNP".toByteArray() + byteArrayOf(1, 0) +
+            ByteBuffer.allocate(14).order(ByteOrder.LITTLE_ENDIAN).putShort(1).putInt(1 shl 20).putInt(0).putInt(7).array()
+        val stream = snap + rex("""{"type":"resize","cols":10,"rows":5}""") + "out".toByteArray()
+        for (cut in 1 until stream.size) {
+            val parser = StreamParser(nonce)
+            val parts = parser.feed(stream.copyOfRange(0, cut)) + parser.feed(stream.copyOfRange(cut, stream.size))
+            assertNull("cut $cut", (parts.single { it is StreamPart.Snapshot } as StreamPart.Snapshot).bytes)
+            assertTrue("cut $cut", parts.contains(StreamPart.Resize(10, 5, null)))
+            assertEquals("cut $cut", "out", output(parts))
+        }
+    }
+
+    @Test
+    fun outputWithoutEscapeIsPassedOnWhole() {
+        val parser = StreamParser(nonce)
+        parser.feed(fakeSnapshot())
+        val chunk = "plain text".toByteArray()
+        val part = parser.feed(chunk).single() as StreamPart.Output
+        assertArrayEquals(chunk, part.bytes)
     }
 }

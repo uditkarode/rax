@@ -79,20 +79,27 @@ class Connections(
     private val _alerts = MutableSharedFlow<Pair<Host, Alert>>(extraBufferCapacity = 64)
     val alerts: SharedFlow<Pair<Host, Alert>> = _alerts.asSharedFlow()
 
-    private var inForeground = false
+    private val inForeground = MutableStateFlow(false)
     private var backgroundJob: Job? = null
+
+    /**
+     * Whether the app is in use or background alerts are on. Hosts stay connected while it is true,
+     * and for a short grace period after.
+     */
+    val inUse: StateFlow<Boolean> = combine(inForeground, keepInBackground) { foreground, keep -> foreground || keep }
+        .stateIn(scope, SharingStarted.Eagerly, false)
 
     init {
         scope.launch { hostStore.hosts.collect { sync(it) } }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
-                inForeground = true
+                inForeground.value = true
                 backgroundJob?.cancel()
                 startAll()
             }
 
             override fun onStop(owner: LifecycleOwner) {
-                inForeground = false
+                inForeground.value = false
                 backgroundJob = scope.launch {
                     // A short grace period, so switching to another app for a moment keeps the session warm.
                     delay(BACKGROUND_GRACE_MS)
@@ -103,7 +110,7 @@ class Connections(
         scope.launch {
             keepInBackground.collect { keep ->
                 if (keep) startAll()
-                else if (!inForeground) _live.value.values.forEach { it.rex.client.suspendConnection() }
+                else if (!inForeground.value) _live.value.values.forEach { it.rex.client.suspendConnection() }
             }
         }
         // While the node is down, every attempt to reach a tailnet host fails at once. Those attempts
@@ -140,7 +147,7 @@ class Connections(
         _live.value.values.filter { !it.host.tailnet }.forEach { it.rex.retryNow() }
     }
 
-    private val active: Boolean get() = inForeground || keepInBackground.value
+    private val active: Boolean get() = inForeground.value || keepInBackground.value
 
     private fun canRun(host: Host): Boolean = active && (!host.tailnet || tailnetUp.value)
 
@@ -162,7 +169,8 @@ class Connections(
             existing?.let { it.rex.stop(); it.scope.cancel() }
             val hostScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             val rex = RexHost(endpoint, client, identity, hostScope)
-            hostScope.launch { rex.alerts.collect { _alerts.emit(host to it) } }
+            // The host can be renamed later and keep this connection.
+            hostScope.launch { rex.alerts.collect { _alerts.emit((_live.value[host.id]?.host ?: host) to it) } }
             hostScope.launch {
                 rex.client.state.collect { st ->
                     if (st is RexClient.State.Down) Log.i(TAG, "${endpoint.display}: ${st.problem}")

@@ -12,6 +12,7 @@ import de.uditkaro.rax.rex.RexClient
 import de.uditkaro.rax.rex.RexEndpoint
 import de.uditkaro.rax.ui.Screen
 import de.uditkaro.rax.ui.SystemActions
+import de.uditkaro.rax.ui.home.addressProblem
 import de.uditkaro.rax.ui.terminal.rememberTerminalFontFamily
 import kotlinx.coroutines.launch
 
@@ -21,6 +22,7 @@ fun HostEditorRoute(graph: AppGraph, system: SystemActions, key: Screen.HostEdit
     val hosts by graph.connections.hosts.collectAsStateWithLifecycle()
     val settings by graph.settings.collectAsStateWithLifecycle()
     val states by graph.connections.states.collectAsStateWithLifecycle()
+    val asked by graph.permissions.asked.collectAsStateWithLifecycle()
     val list = hosts ?: return
     val host = key.hostId?.let { id -> list.firstOrNull { it.id == id } ?: return }
     val mono = rememberTerminalFontFamily(graph, settings?.fontId ?: return)
@@ -46,18 +48,16 @@ fun HostEditorRoute(graph: AppGraph, system: SystemActions, key: Screen.HostEdit
                         },
                     )
                 }
-                is RexEndpoint.Companion.Parsed.Invalid -> when (parsed.reason) {
-                    RexEndpoint.Companion.Reason.Empty -> HostCheck.Ok("")
-                    RexEndpoint.Companion.Reason.BadScheme -> HostCheck.Invalid(r.getString(R.string.host_invalid_scheme))
-                    RexEndpoint.Companion.Reason.BadAddress -> HostCheck.Invalid(r.getString(R.string.host_invalid_address))
-                }
+                is RexEndpoint.Companion.Parsed.Invalid ->
+                    if (parsed.reason == RexEndpoint.Companion.Reason.Empty) HostCheck.Ok("")
+                    else HostCheck.Invalid(addressProblem(r, parsed.reason))
             }
         },
         onSave = { saved ->
             graph.scope.launch { graph.hostStore.save(saved) }
             // Asked here, where the user has just chosen a computer on the local network, and only once;
             // after that, Home offers it on the hosts that need it.
-            if (!saved.tailnet && !graph.localNetwork.granted.value && LocalNetwork.PERMISSION !in settings?.askedPermissions.orEmpty()) {
+            if (!saved.tailnet && !graph.localNetwork.granted.value && LocalNetwork.PERMISSION !in asked && mayBeLocal(graph, saved)) {
                 system.askLocalNetwork()
             }
             onClose()
@@ -68,4 +68,10 @@ fun HostEditorRoute(graph: AppGraph, system: SystemActions, key: Screen.HostEdit
         },
         onClose = onClose,
     )
+}
+
+/** Whether [host] can be on the local network. A name that was not looked up yet can be. */
+private fun mayBeLocal(graph: AppGraph, host: Host): Boolean {
+    val name = (RexEndpoint.parse(host.address, host.tailnet) as? RexEndpoint.Companion.Parsed.Ok)?.endpoint?.host ?: return false
+    return LocalNetwork.covers(name) ?: graph.localNetwork.names.value[name] ?: true
 }

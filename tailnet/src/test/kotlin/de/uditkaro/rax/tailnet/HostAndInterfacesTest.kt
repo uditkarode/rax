@@ -1,6 +1,8 @@
 package de.uditkaro.rax.tailnet
 
+import java.io.File
 import java.net.InetAddress
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,6 +15,23 @@ class HostAndInterfacesTest {
         assertEquals("rax-sm-s928b", hostnameFor("SM-S928B"))
         assertEquals("rax", hostnameFor("  "))
         assertEquals(63, hostnameFor("x".repeat(100)).length)
+    }
+
+    @Test
+    fun nodeEnvironment() {
+        val dir = File("/data/user/0/de.uditkaro.rax/no_backup/tailnet")
+        val certs = Files.createTempDirectory("cacerts").toFile()
+        assertEquals(
+            mapOf(
+                "TS_LOGS_DIR" to dir.path,
+                "HOME" to dir.path,
+                "TS_NO_LOGS_NO_SUPPORT" to "true",
+                "SSL_CERT_DIR" to certs.path,
+            ),
+            nodeEnvironment(dir, certs),
+        )
+        certs.delete()
+        assertEquals(setOf("TS_LOGS_DIR", "HOME", "TS_NO_LOGS_NO_SUPPORT"), nodeEnvironment(dir, certs).keys)
     }
 
     @Test

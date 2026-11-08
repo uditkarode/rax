@@ -10,6 +10,7 @@ internal data class StatusJson(
     val state: String,
     val authURL: String? = null,
     val error: String? = null,
+    val loggingRequired: Boolean = false,
     val tailnet: String? = null,
     val self: PeerJson? = null,
     val peers: List<PeerJson> = emptyList(),
@@ -36,7 +37,7 @@ internal fun parseStatus(text: String): NodeState {
             dnsName = s.self?.dnsName.orEmpty(),
             addresses = s.self?.ips.orEmpty().map(::parseIp),
         )
-        !s.error.isNullOrEmpty() -> TailnetStatus.Error(s.error)
+        !s.error.isNullOrEmpty() -> TailnetStatus.Error(s.error, s.loggingRequired)
         s.state == "NeedsLogin" ->
             // The URL arrives a moment after the state; until then the node is still starting.
             s.authURL?.takeIf { it.isNotEmpty() }?.let(TailnetStatus::NeedsLogin) ?: TailnetStatus.Starting

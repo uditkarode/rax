@@ -62,19 +62,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.uditkaro.rax.AppGraph
 import de.uditkaro.rax.R
 import de.uditkaro.rax.activeTheme
-import de.uditkaro.rax.rex.HostState
+import de.uditkaro.rax.data.Settings
 import de.uditkaro.rax.theme.Rax
 import de.uditkaro.rax.theme.RaxType
 import de.uditkaro.rax.ui.components.IconAction
 import de.uditkaro.rax.ui.components.PrimaryButton
 import de.uditkaro.rax.ui.components.ProgramGlyph
 import de.uditkaro.rax.ui.components.RaxIcon
-import de.uditkaro.rax.ui.home.appName
-import de.uditkaro.rax.ui.home.shortPath
 import de.uditkaro.rax.ui.home.tabRow
 import io.github.xchacha20_poly1305.libghostty.compose.GhosttyDialogs
 import io.github.xchacha20_poly1305.libghostty.compose.GhosttyTerminal
-import io.github.xchacha20_poly1305.libghostty.compose.rememberGhosttyExtraKeysState
 import io.github.xchacha20_poly1305.libghostty.compose.rememberGhosttyTerminalState
 import kotlinx.coroutines.launch
 
@@ -82,10 +79,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
     val c = Rax.colors
-    val context = LocalContext.current
     val settings by graph.settings.collectAsStateWithLifecycle()
     val themes by graph.themes.collectAsStateWithLifecycle()
-    val host by vm.host.collectAsStateWithLifecycle()
+    val header by vm.header.collectAsStateWithLifecycle()
     val target by vm.target.collectAsStateWithLifecycle()
     val session by vm.session.collectAsStateWithLifecycle()
     val view by vm.view.collectAsStateWithLifecycle()
@@ -94,11 +90,8 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
     LaunchedEffect(vm, theme) { vm.setTheme(theme.terminal.toPane(theme.dark)) }
     val font = rememberTerminalFont(graph, s.fontId)
     val terminalState = rememberGhosttyTerminalState()
-    val extraKeys = rememberGhosttyExtraKeysState()
-    DisposableEffect(terminalState, extraKeys) {
-        terminalState.stickyModifiers = extraKeys
-        onDispose { terminalState.stickyModifiers = null }
-    }
+    // Pinch zoom stays in the sizes the settings keep.
+    terminalState.fontSizeRangeSp = Settings.FONT_SIZES
     val rootView = LocalView.current
     val scope = rememberCoroutineScope()
 
@@ -118,13 +111,8 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
         onDispose { lifecycle.removeObserver(observer) }
     }
 
-    val window = vm.window(host)
-    val sessionState = host?.session(vm.sessionId)
-    val tab = window?.let { w ->
-        tabRow(context.resources, vm.hostId, vm.sessionId, sessionState?.info?.label.orEmpty(), w, 0, host?.blocks.orEmpty(), target?.blockId)
-    }
-    val facts = target?.blockId?.let { host?.blocks?.get(it) }
-    val panes = window?.blocks?.filter { it.isTerminal && it.id != null }.orEmpty()
+    val tab = header.tab
+    val panes = header.panes
     val imeVisible = WindowInsets.isImeVisible
     val terminalBackground = Color(theme.terminal.background)
 
@@ -136,10 +124,9 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
             .imePadding(),
     ) {
         TopBar(
-            title = tab?.title ?: sessionState?.info?.label.orEmpty(),
-            subtitle = listOfNotNull(sessionState?.info?.label, shortPath(facts?.cwd, facts?.process?.home)).joinToString("  ·  "),
+            title = tab?.title ?: header.sessionName,
+            subtitle = header.subtitle,
             glyph = { tab?.let { ProgramGlyph(it.program, it.programName, it.icon, size = 30.dp) } },
-            host = host,
             vm = vm,
             currentWindowId = target?.windowId,
             onBack = onBack,
@@ -175,7 +162,6 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
         if (imeVisible) {
             KeyBar(
                 terminal = terminalState,
-                extraKeys = extraKeys,
                 onHideKeyboard = { ViewCompat.getWindowInsetsController(rootView)?.hide(WindowInsetsCompat.Type.ime()) },
             )
         } else {
@@ -185,7 +171,7 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (panes.size > 1) {
-                    PaneSwitcher(panes.map { it.id!! }, target?.blockId, host, onPick = { id ->
+                    PaneSwitcher(panes, target?.blockId, onPick = { id ->
                         target?.let { vm.show(PaneTarget(it.windowId, id)) }
                     })
                 }
@@ -198,15 +184,15 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
         }
     }
 
-    if (actions && target != null && window != null) {
+    if (actions && target != null && tab != null) {
         ActionsSheet(
             graph = graph,
             vm = vm,
             windowId = target!!.windowId,
             blockId = target!!.blockId,
-            tabTitle = tab?.title.orEmpty(),
-            paneTitle = panes.firstOrNull { it.id == target!!.blockId }?.label ?: tab?.title.orEmpty(),
-            sessionName = sessionState?.info?.label.orEmpty(),
+            tabTitle = tab.title,
+            paneTitle = panes.firstOrNull { it.id == target!!.blockId }?.label ?: tab.title,
+            sessionName = header.sessionName,
             onDismiss = { actions = false },
             onLeave = onBack,
         )
@@ -214,7 +200,7 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
     if (moreKeys) {
         MoreKeysSheet(terminalState, onDismiss = { moreKeys = false })
     }
-    // Asks before an unsafe paste or a program's clipboard read, and offers a tapped link.
+    // Asks before an unsafe paste, and offers a tapped link.
     GhosttyDialogs(terminalState)
 }
 
@@ -223,7 +209,6 @@ private fun TopBar(
     title: String,
     subtitle: String,
     glyph: @Composable () -> Unit,
-    host: HostState?,
     vm: TerminalViewModel,
     currentWindowId: String?,
     onBack: () -> Unit,
@@ -266,9 +251,10 @@ private fun TopBar(
                     }
                 }
             }
-            val view = host?.session(vm.sessionId)?.view
             DropdownMenu(expanded = tabs, onDismissRequest = { tabs = false }) {
-                view?.tabs.orEmpty().forEachIndexed { i, w ->
+                // Every tab's row follows the whole host, so it is read only while the menu is open.
+                val host by vm.host.collectAsStateWithLifecycle()
+                host?.session(vm.sessionId)?.view?.tabs.orEmpty().forEachIndexed { i, w ->
                     val row = tabRow(context.resources, vm.hostId, vm.sessionId, "", w, i, host?.blocks.orEmpty()) ?: return@forEachIndexed
                     DropdownMenuItem(
                         text = {
@@ -294,7 +280,7 @@ private fun TopBar(
 }
 
 @Composable
-private fun PaneSwitcher(panes: List<String>, selected: String?, host: HostState?, onPick: (String) -> Unit) {
+private fun PaneSwitcher(panes: List<PaneChip>, selected: String?, onPick: (String) -> Unit) {
     val c = Rax.colors
     Row(
         Modifier
@@ -305,24 +291,22 @@ private fun PaneSwitcher(panes: List<String>, selected: String?, host: HostState
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        panes.forEach { id ->
-            val facts = host?.blocks?.get(id)
-            val name = facts?.status?.values?.firstNotNullOfOrNull { it.effectiveApp ?: it.app }?.let(::appName) ?: facts?.programName ?: "…"
-            val on = id == selected
+        panes.forEach { pane ->
+            val on = pane.id == selected
             Row(
                 Modifier
                     .clip(RoundedCornerShape(18.dp))
                     .background(if (on) c.control else Color.Transparent)
-                    .clickable(role = Role.Tab) { onPick(id) }
+                    .clickable(role = Role.Tab) { onPick(pane.id) }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    name,
+                    pane.name,
                     style = RaxType.subhead,
                     color = when {
-                        facts?.waiting != null -> c.warning
+                        pane.waiting -> c.warning
                         on -> c.text
                         else -> c.textSecondary
                     },

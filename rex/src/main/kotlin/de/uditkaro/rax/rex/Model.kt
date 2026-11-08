@@ -23,6 +23,10 @@ data class SessionView(
     val windows: List<WindowView>? = null,
 ) {
     val tabs: List<WindowView> get() = windows.orEmpty()
+
+    /** The IDs of every terminal pane in the session, minimized ones included. */
+    val terminalIds: Set<String>
+        get() = tabs.flatMap { w -> w.allBlocks.filter { it.isTerminal }.mapNotNull { it.id } }.toSet()
 }
 
 @Serializable
@@ -35,11 +39,17 @@ data class WindowView(
 ) {
     /** Panes in reading order: the tiled layout first, left to right and top to bottom, then floating ones. */
     val blocks: List<BlockView>
-        get() = layers.orEmpty().filter { it.state != "minimized" }.flatMap { layer ->
-            val byId = layer.blocks.orEmpty().associateBy { it.id }
-            val ordered = layer.layout?.blockIds().orEmpty().mapNotNull { byId[it] }
-            ordered + layer.blocks.orEmpty().filter { it !in ordered }
-        }
+        get() = blocksOf(layers.orEmpty().filter { it.state != "minimized" })
+
+    /** Every pane of the tab, minimized floating ones included, in the order of [blocks]. */
+    val allBlocks: List<BlockView>
+        get() = blocksOf(layers.orEmpty())
+
+    private fun blocksOf(layers: List<LayerView>): List<BlockView> = layers.flatMap { layer ->
+        val byId = layer.blocks.orEmpty().associateBy { it.id }
+        val ordered = layer.layout?.blockIds().orEmpty().mapNotNull { byId[it] }
+        ordered + layer.blocks.orEmpty().filter { it !in ordered }
+    }
 
     /** The pane a phone should show first: the zoomed one, the focused one, or the first. */
     val primaryBlockId: String?

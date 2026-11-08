@@ -5,6 +5,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.material3.DropdownMenu
@@ -19,6 +20,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -38,6 +40,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import io.github.xchacha20_poly1305.libghostty.GhosttyTerminalSession
 import io.github.xchacha20_poly1305.libghostty.GhosttyTheme
 import androidx.compose.ui.res.stringResource
@@ -78,6 +83,7 @@ public fun GhosttyTerminal(
     val currentOnFontSizeChanged by rememberUpdatedState(onFontSizeChanged)
 
     controller.clipboard = rememberPlatformClipboard()
+    controller.showMessage = rememberShowMessage()
     controller.uriHandler = LocalUriHandler.current
     controller.haptics = LocalHapticFeedback.current
     controller.textToolbar = LocalTextToolbar.current
@@ -137,6 +143,13 @@ public fun GhosttyTerminal(
     val windowFocused = LocalWindowInfo.current.isWindowFocused
     LaunchedEffect(session, windowFocused) { controller.onWindowFocusChanged(windowFocused) }
 
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val started = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    LaunchedEffect(started) { controller.onStartedChanged(started) }
+
+    val accessibilityEnabled by rememberAccessibilityEnabled()
+    LaunchedEffect(accessibilityEnabled) { controller.onAccessibilityChanged(accessibilityEnabled) }
+
     LaunchedEffect(session, focusOnAttach) {
         if (session != null && focusOnAttach) {
             focusRequester.requestFocus()
@@ -159,9 +172,19 @@ public fun GhosttyTerminal(
             .selectionMagnifier { controller.magnifierCenter }
             .drawBehind {
                 controller.frame
-                drawTerminal(controller, handleColor, showHandles = true)
+                drawTerminal(controller)
             },
     ) {
+        // Its own layer, so a cursor blink draws only this.
+        Spacer(
+            Modifier
+                .matchParentSize()
+                .graphicsLayer()
+                .drawBehind {
+                    controller.frame
+                    drawTerminalOverlay(controller, handleColor)
+                },
+        )
         TerminalContextMenu(controller)
     }
 }

@@ -29,6 +29,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import de.uditkaro.rax.R
 import de.uditkaro.rax.data.Host
+import de.uditkaro.rax.rex.RexEndpoint
 import de.uditkaro.rax.theme.Rax
 import de.uditkaro.rax.theme.RaxType
 import de.uditkaro.rax.ui.components.ActionRow
@@ -39,6 +40,7 @@ import de.uditkaro.rax.ui.components.SectionHeader
 import de.uditkaro.rax.ui.components.ToggleRow
 import de.uditkaro.rax.ui.components.IconAction
 import de.uditkaro.rax.ui.components.RowBase
+import java.util.UUID
 
 /**
  * Adds or edits a computer. [describe] turns what was typed into the sentence under the address
@@ -62,6 +64,14 @@ fun HostEditorScreen(
     var tailnet by rememberSaveable { mutableStateOf(host?.tailnet ?: false) }
     var tailnetTouched by rememberSaveable { mutableStateOf(host != null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val newId = rememberSaveable { UUID.randomUUID().toString() }
+    // The screen still takes taps while it slides away, and a second save or close must not run.
+    var done by remember { mutableStateOf(false) }
+    fun finish(action: () -> Unit) {
+        if (done) return
+        done = true
+        action()
+    }
 
     // A MagicDNS name or a tailnet IP means the user wants Tailscale, until they say otherwise.
     LaunchedEffect(address) {
@@ -73,16 +83,18 @@ fun HostEditorScreen(
         if (canSave) {
             val trimmed = address.trim()
             val finalName = name.trim().ifEmpty { defaultName(trimmed) }
-            onSave((host ?: Host(name = finalName, address = trimmed)).copy(name = finalName, address = trimmed, tailnet = tailnet))
+            val id = if (isNew || host == null) newId else host.id
+            finish { onSave(Host(id = id, name = finalName, address = trimmed, tailnet = tailnet)) }
         }
     }
+    val close = { finish(onClose) }
 
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (host == null) focus.requestFocus() }
 
     LargeTitleScreen(
         title = stringResource(if (isNew) R.string.add_host else R.string.host_edit),
-        onBack = onClose,
+        onBack = close,
         backIcon = R.drawable.ic_close,
         backLabel = stringResource(R.string.close),
         actions = {
@@ -171,7 +183,7 @@ fun HostEditorScreen(
             title = { Text(stringResource(R.string.host_delete_title, host.name)) },
             text = { Text(stringResource(R.string.host_delete_body)) },
             confirmButton = {
-                TextButton(onClick = { confirmDelete = false; onDelete(host) }) {
+                TextButton(onClick = { confirmDelete = false; finish { onDelete(host) } }) {
                     Text(stringResource(R.string.host_delete), color = Rax.colors.danger)
                 }
             },
@@ -222,16 +234,16 @@ private fun Field(
 }
 
 fun looksLikeTailnet(address: String): Boolean {
-    val host = address.trim().substringAfter("://").substringBefore('/').substringBefore(':').lowercase()
+    val host = RexEndpoint.hostOf(address)?.lowercase() ?: return false
     if (host.endsWith(".ts.net")) return true
+    // fd7a:115c:a1e0::/48 and 100.64.0.0/10, the ranges Tailscale gives its nodes.
+    if (host.startsWith("fd7a:115c:a1e0:")) return true
     val parts = host.split('.').mapNotNull { it.toIntOrNull() }
-    // 100.64.0.0/10, the range Tailscale gives its nodes.
     return parts.size == 4 && parts[0] == 100 && parts[1] in 64..127
 }
 
 /** The first label of a host name, or the address itself for an IP. */
 fun defaultName(address: String): String {
-    val host = address.substringAfter("://").substringBefore('/').substringBefore(':')
-    if (host.isEmpty()) return ""
-    return if (host.any { it.isLetter() }) host.substringBefore('.') else host
+    val host = RexEndpoint.hostOf(address) ?: return ""
+    return if (RexEndpoint.isIpLiteral(host)) host else host.substringBefore('.')
 }

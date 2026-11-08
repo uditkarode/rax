@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"tailscale.com/hostinfo"
 	"tailscale.com/ipn"
 	"tailscale.com/logtail"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
 )
 
@@ -38,9 +41,13 @@ type node struct {
 
 	mu    sync.Mutex
 	state ipn.State
-	// errMsg is the last critical error from the backend. It is cleared
-	// when the node reaches Running.
+	// errMsg is the last error from the backend. It is cleared when the
+	// backend moves on: a new state, a login URL, or a finished login.
 	errMsg string
+	// loggingErr is set when the tailnet requires network flow logs. The
+	// backend then stops for good, so it stays until the node runs again
+	// or logs out.
+	loggingErr string
 	// loginRequested is set while an interactive login is in progress, so
 	// that the bus watcher does not start a second one.
 	loginRequested bool
@@ -56,6 +63,10 @@ func current() *node {
 // Start starts the node with its state in dir. It returns when the node is
 // initialized; login and connection progress arrive through Host.OnStatus.
 // Calling Start on a started node does nothing.
+//
+// Start sets TS_LOGS_DIR, HOME and TS_NO_LOGS_NO_SUPPORT. Adding a variable
+// to the C environment can move it while other threads read it, so the
+// caller must create these variables before the app starts other threads.
 func Start(dir, hostname, deviceModel, osVersion string) error {
 	lifecycle.Lock()
 	defer lifecycle.Unlock()
@@ -148,7 +159,8 @@ func Login() error {
 }
 
 // Logout logs the node out and deletes its keys, then requests a login URL
-// for the next login.
+// for the next login. If the control server cannot be told, the node keeps
+// its keys and runs on, and Logout returns the error.
 func Logout() error {
 	lifecycle.Lock()
 	defer lifecycle.Unlock()
@@ -162,24 +174,48 @@ func Logout() error {
 	n.loginRequested = true
 	n.mu.Unlock()
 	if err := n.lc.Logout(ctx); err != nil {
+		n.resume()
 		return err
 	}
+	n.mu.Lock()
+	n.errMsg = ""
+	n.loggingErr = ""
+	n.mu.Unlock()
 	return n.login(ctx)
+}
+
+// resume runs the node again with its keys after a failed logout. The
+// backend has saved the prefs as logged out and stopped, but it deletes the
+// keys only after the control server takes the logout. Only a new control
+// client uses the saved keys again, so this starts the backend again.
+func (n *node) resume() {
+	ctx, cancel := context.WithTimeout(n.ctx, 30*time.Second)
+	defer cancel()
+	if err := n.lc.Start(ctx, ipn.Options{UpdatePrefs: n.prefs()}); err != nil {
+		logWarnf("starting again after a failed logout: %v", err)
+	}
+	n.mu.Lock()
+	n.loginRequested = false
+	n.mu.Unlock()
 }
 
 func (n *node) login(ctx context.Context) error {
 	n.mu.Lock()
 	n.loginRequested = true
 	n.mu.Unlock()
-	// Logout deletes the login profile and its prefs, so set the prefs again
-	// the way tsnet sets them at start.
-	prefs := ipn.NewPrefs()
-	prefs.Hostname = n.hostname
-	prefs.WantRunning = true
-	if err := n.lc.Start(ctx, ipn.Options{UpdatePrefs: prefs}); err != nil {
+	// Logout deletes the login profile and its prefs, so set them again.
+	if err := n.lc.Start(ctx, ipn.Options{UpdatePrefs: n.prefs()}); err != nil {
 		return err
 	}
 	return n.lc.StartLoginInteractive(ctx)
+}
+
+// prefs returns the prefs the way tsnet sets them at start.
+func (n *node) prefs() *ipn.Prefs {
+	prefs := ipn.NewPrefs()
+	prefs.Hostname = n.hostname
+	prefs.WantRunning = true
+	return prefs
 }
 
 func (n *node) running() bool {
@@ -202,7 +238,7 @@ func runningNode() (*node, error) {
 // watch follows the IPN bus for the node's lifetime.
 func (n *node) watch() {
 	for n.ctx.Err() == nil {
-		w, err := n.lc.WatchIPNBus(n.ctx, ipn.NotifyInitialState|ipn.NotifyPeerChanges)
+		w, err := n.lc.WatchIPNBus(n.ctx, ipn.NotifyInitialState|ipn.NotifyPeerPatches)
 		if err != nil {
 			if n.ctx.Err() == nil {
 				logWarnf("watching the IPN bus: %v", err)
@@ -224,27 +260,7 @@ func (n *node) readBus(w *local.IPNBusWatcher) {
 		if err != nil {
 			return
 		}
-		n.mu.Lock()
-		if msg.ErrMessage != nil {
-			n.errMsg = *msg.ErrMessage
-			logWarnf("backend error: %s", n.errMsg)
-		}
-		if msg.State != nil && *msg.State != n.state {
-			logInfof("state %v -> %v", n.state, *msg.State)
-			n.state = *msg.State
-			if n.state == ipn.Running {
-				n.errMsg = ""
-				n.loginRequested = false
-			}
-		}
-		// The node can drop back to NeedsLogin later, for example when its
-		// key expires. Request a URL so the app can show it.
-		startLogin := n.state == ipn.NeedsLogin && !n.loginRequested
-		if startLogin {
-			n.loginRequested = true
-		}
-		n.mu.Unlock()
-
+		changed, startLogin := n.apply(&msg)
 		if startLogin {
 			go func() {
 				ctx, cancel := context.WithTimeout(n.ctx, 30*time.Second)
@@ -254,11 +270,68 @@ func (n *node) readBus(w *local.IPNBusWatcher) {
 				}
 			}()
 		}
-		select {
-		case n.dirty <- struct{}{}:
-		default:
+		if changed {
+			select {
+			case n.dirty <- struct{}{}:
+			default:
+			}
 		}
 	}
+}
+
+// busFellBehind starts the message that the IPN bus sends before it closes a
+// watch whose reader fell behind. watch then watches again, so it is not an
+// error of the node.
+const busFellBehind = "IPN bus consumer fell behind"
+
+// requiresLogging is in the message that the backend sends, before it stops,
+// when the tailnet uses network flow logs. Those need the log upload that
+// TS_NO_LOGS_NO_SUPPORT turns off.
+const requiresLogging = "requires logging"
+
+// apply records a bus message. It reports whether the status can have
+// changed, and whether the node needs a login that nobody requested yet.
+func (n *node) apply(msg *ipn.Notify) (changed, startLogin bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	stateChanged := msg.State != nil && *msg.State != n.state
+	if stateChanged || msg.BrowseToURL != nil || msg.LoginFinished != nil {
+		n.errMsg = ""
+	}
+	if msg.ErrMessage != nil && !strings.HasPrefix(*msg.ErrMessage, busFellBehind) {
+		logWarnf("backend error: %s", *msg.ErrMessage)
+		if strings.Contains(*msg.ErrMessage, requiresLogging) {
+			n.loggingErr = *msg.ErrMessage
+		} else {
+			n.errMsg = *msg.ErrMessage
+		}
+	}
+	if stateChanged {
+		logInfof("state %v -> %v", n.state, *msg.State)
+		n.state = *msg.State
+		if n.state == ipn.Running {
+			n.loggingErr = ""
+			n.loginRequested = false
+		}
+	}
+	// The node can drop back to NeedsLogin later, for example when its key
+	// expires. Request a URL so the app can show it.
+	if n.state == ipn.NeedsLogin && !n.loginRequested {
+		n.loginRequested = true
+		startLogin = true
+	}
+	return affectsStatus(msg), startLogin
+}
+
+// affectsStatus reports whether msg can change what buildStatus returns.
+// Patches that only move a peer's endpoints, DERP home or last-seen time
+// change nothing in it.
+func affectsStatus(msg *ipn.Notify) bool {
+	if msg.State != nil || msg.ErrMessage != nil || msg.BrowseToURL != nil || msg.LoginFinished != nil ||
+		msg.SelfChange != nil || len(msg.PeersChanged) > 0 || len(msg.PeersRemoved) > 0 {
+		return true
+	}
+	return slices.ContainsFunc(msg.PeerChangedPatch, func(p *tailcfg.PeerChange) bool { return p.Online != nil })
 }
 
 // publishLoop sends the status to Kotlin after each change, at most a few
@@ -294,9 +367,9 @@ func (n *node) publish() {
 		return
 	}
 	n.mu.Lock()
-	errMsg := n.errMsg
+	errMsg, loggingErr := n.errMsg, n.loggingErr
 	n.mu.Unlock()
-	b, err := json.Marshal(buildStatus(st, errMsg))
+	b, err := json.Marshal(buildStatus(st, errMsg, loggingErr))
 	if err != nil {
 		logErrorf("encoding status: %v", err)
 		return

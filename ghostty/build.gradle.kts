@@ -50,6 +50,13 @@ abstract class BuildGhosttyNative : DefaultTask() {
     @get:Internal
     abstract val ndkDirectory: DirectoryProperty
 
+    @get:Input
+    @get:Optional
+    abstract val ndkVersion: Property<String>
+
+    @get:Input
+    abstract val zigVersion: Property<String>
+
     @get:OutputDirectory
     abstract val outputDir: DirectoryProperty
 
@@ -68,11 +75,14 @@ abstract class BuildGhosttyNative : DefaultTask() {
 val buildScript = layout.projectDirectory.file("build-native.sh")
 val pin = files("GHOSTTY_COMMIT", fileTree("patches") { include("*.patch") })
 val nativeSources = fileTree("native") { exclude(".zig-cache/**", "zig-out/**", "zig-pkg/**") }
+val installedZig = providers.exec { commandLine(buildScript.asFile.absolutePath, "zig-version") }
+    .standardOutput.asText.map { it.trim() }
 
 val ghosttySource = tasks.register<BuildGhosttyNative>("ghosttySource") {
     command = "source"
     sources.from(pin)
     script = buildScript
+    zigVersion = ""
     outputDir = layout.buildDirectory.dir("ghostty-source")
 }
 
@@ -81,11 +91,15 @@ fun registerZigBuild(name: String, command: String, output: String) = tasks.regi
     this.command = command
     sources.from(pin, nativeSources)
     script = buildScript
+    zigVersion = installedZig
     outputDir = layout.buildDirectory.dir(output)
 }
 
 val ghosttyJni = registerZigBuild("ghosttyJni", "android", "ghostty/jniLibs").also {
-    it.configure { ndkDirectory = androidComponents.sdkComponents.ndkDirectory }
+    it.configure {
+        ndkDirectory = androidComponents.sdkComponents.ndkDirectory
+        ndkVersion = libs.versions.ndk
+    }
 }
 val ghosttyKotlin = registerZigBuild("ghosttyKotlin", "kotlin", "ghostty/kotlin")
 val ghosttyHostJni = registerZigBuild("ghosttyHostJni", "host", "ghostty/host")

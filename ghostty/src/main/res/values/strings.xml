@@ -9,5 +9,8 @@
     <string name="ghostty_cancel">Cancel</string>
     <string name="ghostty_copy">Copy</string>
     <string name="ghostty_copy_link">Copy link</string>
+    <string name="ghostty_link_unavailable">No app can open this link.</string>
+    <string name="ghostty_copy_too_long">This text is too long to copy.</string>
+    <string name="ghostty_copy_failed">Couldn\'t copy the text.</string>
     <string name="ghostty_select_all">Select all</string>
 </resources>

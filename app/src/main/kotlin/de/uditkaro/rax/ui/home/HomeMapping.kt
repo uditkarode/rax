@@ -3,6 +3,7 @@ package de.uditkaro.rax.ui.home
 import android.content.res.Resources
 import androidx.annotation.DrawableRes
 import de.uditkaro.rax.R
+import de.uditkaro.rax.connection.LocalNetwork
 import de.uditkaro.rax.data.Host
 import de.uditkaro.rax.rex.BlockFacts
 import de.uditkaro.rax.rex.HostState
@@ -10,9 +11,11 @@ import de.uditkaro.rax.rex.ProcessInfo
 import de.uditkaro.rax.rex.Problem
 import de.uditkaro.rax.rex.ProgramRecord
 import de.uditkaro.rax.rex.RexClient
+import de.uditkaro.rax.rex.RexEndpoint
 import de.uditkaro.rax.rex.WindowView
 import de.uditkaro.rax.tailnet.TailnetStatus
 import de.uditkaro.rax.ui.components.ProgramKind
+import java.time.OffsetDateTime
 
 private val shells = setOf("zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh", "csh", "nu", "pwsh", "xonsh", "elvish", "login")
 private val editors = setOf("nvim", "vim", "vi", "nano", "emacs", "hx", "helix", "micro", "kak", "kakoune", "joe", "mg")
@@ -104,7 +107,8 @@ fun programIcon(app: String?, process: ProcessInfo?): Int? {
 
 fun shortPath(path: String?, home: String?): String? {
     if (path.isNullOrBlank()) return null
-    val withHome = if (home != null && home.length > 1 && path.startsWith(home)) "~" + path.removePrefix(home) else path
+    val inHome = home != null && home.length > 1 && (path == home || path.startsWith("$home/"))
+    val withHome = if (inHome) "~" + path.removePrefix(home.orEmpty()) else path
     val parts = withHome.split('/').filter { it.isNotEmpty() }
     return if (parts.size <= 3) withHome else (if (withHome.startsWith("~")) "~/…/" else "/…/") + parts.takeLast(2).joinToString("/")
 }
@@ -181,6 +185,7 @@ fun tabRow(
         programName = agentName ?: program ?: title,
         icon = programIcon(app, facts?.process?.foreground ?: facts?.process?.child),
         waiting = waiting != null,
+        waitingSince = waiting?.updatedAt?.let { runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() },
     )
 }
 
@@ -198,18 +203,35 @@ private fun linkOf(r: Resources, host: Host, state: HostState?): Link = when (va
 }
 
 /** Whether Rax can talk to [host] now, and if not, why. */
-fun hostLink(r: Resources, host: Host, state: HostState?, access: Access): Link = when {
-    state?.link is RexClient.State.Connected && state.ready -> Link.Online(host.tailnet)
-    host.tailnet -> when (access.tailnet) {
-        is TailnetStatus.NeedsLogin -> Link.Blocked(Need.TailscaleSignIn)
-        TailnetStatus.NeedsApproval -> Link.Offline(r.getString(R.string.problem_tailnet_approval), retryable = false)
-        is TailnetStatus.Error -> Link.Offline(r.getString(R.string.problem_tailnet_failed))
-        TailnetStatus.Stopped, TailnetStatus.Starting -> Link.Connecting
-        is TailnetStatus.Running -> linkOf(r, host, state)
+fun hostLink(r: Resources, host: Host, state: HostState?, access: Access): Link {
+    if (state?.link is RexClient.State.Connected && state.ready) return Link.Online(host.tailnet)
+    val endpoint = when (val parsed = RexEndpoint.parse(host.address, host.tailnet)) {
+        is RexEndpoint.Companion.Parsed.Ok -> parsed.endpoint
+        is RexEndpoint.Companion.Parsed.Invalid -> return Link.Offline(addressProblem(r, parsed.reason), retryable = false)
     }
-    !access.localNetwork -> Link.Blocked(Need.LocalNetwork)
-    else -> linkOf(r, host, state)
+    return when {
+        host.tailnet -> when (access.tailnet) {
+            is TailnetStatus.NeedsLogin -> Link.Blocked(Need.TailscaleSignIn)
+            TailnetStatus.NeedsApproval -> Link.Offline(r.getString(R.string.problem_tailnet_approval), retryable = false)
+            is TailnetStatus.Error -> Link.Offline(r.getString(R.string.problem_tailnet_failed))
+            TailnetStatus.Stopped, TailnetStatus.Starting -> Link.Connecting
+            is TailnetStatus.Running -> linkOf(r, host, state)
+        }
+        // A name that was not looked up yet shows as connecting until the lookup tells.
+        !access.localNetwork && (LocalNetwork.covers(endpoint.host) ?: access.localNames[endpoint.host] ?: false) ->
+            Link.Blocked(Need.LocalNetwork)
+        else -> linkOf(r, host, state)
+    }
 }
+
+/** Why Rax cannot use an address, in the user's words. */
+fun addressProblem(r: Resources, reason: RexEndpoint.Companion.Reason): String = r.getString(
+    when (reason) {
+        RexEndpoint.Companion.Reason.Empty, RexEndpoint.Companion.Reason.BadAddress -> R.string.host_invalid_address
+        RexEndpoint.Companion.Reason.BadScheme -> R.string.host_invalid_scheme
+        RexEndpoint.Companion.Reason.ShortTailnetName -> R.string.host_invalid_short_tailnet
+    },
+)
 
 fun buildHome(r: Resources, hosts: List<Host>, states: Map<String, HostState>, access: Access): HomeState {
     val cards = hosts.map { host ->
@@ -225,9 +247,10 @@ fun buildHome(r: Resources, hosts: List<Host>, states: Map<String, HostState>, a
         }
         HostCard(host, link, sessions)
     }
-    // With a single session, its waiting tabs already stand out in its own list.
-    val sessionCount = cards.sumOf { it.sessions.size }
-    val waiting = if (sessionCount < 2) emptyList()
-    else cards.filter { it.link is Link.Online }.flatMap { c -> c.sessions.flatMap { it.tabs } }.filter { it.waiting }
+    // With a single session on screen, its waiting tabs already stand out in its own list. Home
+    // shows the sessions of online hosts only.
+    val online = cards.filter { it.link is Link.Online }
+    val waiting = if (online.sumOf { it.sessions.size } < 2) emptyList()
+    else online.flatMap { c -> c.sessions.flatMap { it.tabs } }.filter { it.waiting }.sortedByDescending { it.waitingSince ?: Long.MIN_VALUE }
     return HomeState(cards, waiting)
 }
