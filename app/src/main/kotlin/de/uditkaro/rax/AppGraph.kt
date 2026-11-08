@@ -188,6 +188,12 @@ class AppGraph(val app: Application) {
         connections.retry(host.id)
     }
 
+    /** Pull to refresh on Home: starts the Tailscale node again if it failed, and refreshes every host. */
+    suspend fun refresh() {
+        if (connections.hosts.value.orEmpty().any { connections.usesNode(it) }) scope.launch { tailnet.retry() }
+        connections.refresh()
+    }
+
     /** Writes a setting without tying it to the screen that asked, so leaving the screen cannot cancel it. */
     fun updateSettings(block: suspend SettingsStore.() -> Unit) {
         scope.launch { settingsStore.block() }

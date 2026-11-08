@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -153,6 +154,26 @@ class RexHost(
     fun start() = client.start()
     fun stop() = client.stop()
     fun retryNow() = client.retryNow()
+
+    /**
+     * For a user who asks to refresh: a connection that is down tries again at once, and one that is
+     * up must answer a small call within [PROBE_MS], or it is dropped and opened again. A network that
+     * went away without a word can leave a connection that looks open until the pings notice.
+     */
+    suspend fun refresh() {
+        val connected = client.state.value as? RexClient.State.Connected
+        if (connected == null) {
+            client.start()
+            return
+        }
+        // An error reply is an answer too. Only silence means the connection is gone.
+        val answered = withTimeoutOrNull(PROBE_MS) { runCatching { client.call("server.whoami", timeoutMs = PROBE_MS) } } != null
+        if (!answered && client.state.value === connected) {
+            // Dropped without a close frame, so the server keeps this client and the new connection resumes it.
+            client.suspendConnection()
+            client.start()
+        }
+    }
 
     private fun handle(m: Msg) {
         when (m) {
@@ -613,6 +634,9 @@ class RexHost(
 
 /** The longest a host's first load waits for slow or failing reads before the host shows what it has. */
 private const val LOAD_WAIT_MS = 2_000L
+
+/** How long a refresh waits for a connected server to answer. */
+private const val PROBE_MS = 5_000L
 
 /** A `file://host/path` URL from OSC 7 as a path; a plain path stays as it is. */
 fun pathOf(pwd: String): String =

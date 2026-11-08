@@ -72,16 +72,26 @@ class HomeActions(
     val allow: (Need) -> Unit,
     val settings: () -> Unit,
     val tailscale: () -> Unit,
+    val refresh: () -> Unit,
 )
 
 @Composable
-fun HomeScreen(state: HomeState, mono: FontFamily, actions: HomeActions, creating: Set<String>, updateAvailable: Boolean = false) {
+fun HomeScreen(
+    state: HomeState,
+    mono: FontFamily,
+    actions: HomeActions,
+    creating: Set<String>,
+    updateAvailable: Boolean = false,
+    refreshing: Boolean = false,
+) {
     val empty = state.hosts.isEmpty()
     LargeTitleScreen(
         title = stringResource(if (empty) R.string.welcome_title else R.string.home_title),
         onBack = null,
         actions = { SettingsAction(updateAvailable, actions.settings) },
         bottomBar = if (empty) ({ PrimaryButton(stringResource(R.string.add_host), actions.addHost) }) else null,
+        onRefresh = actions.refresh.takeUnless { empty },
+        refreshing = refreshing,
     ) {
         if (empty) {
             welcome(mono, actions.tailscale)

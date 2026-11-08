@@ -85,6 +85,10 @@ says Rex is newer. Before raising Rax's revision, read the schema diff (see "Whe
 - `stop()` closes with 1000, which ends the client on the server at once. `suspendConnection()`
   drops the socket without a close frame, so the server keeps the client and the next connect
   resumes it. Rax suspends 30 s after it goes to the background, unless background alerts are on.
+- Pull to refresh on Home calls `RexHost.refresh()`. A connection that is down tries again at
+  once. One that is up must answer `server.whoami` within 5 seconds, or it is dropped without a
+  close frame and opened again, so it resumes. A network that went away without a word leaves a
+  connection that looks open until the pings notice, which takes minutes.
 
 ## The data stream
 

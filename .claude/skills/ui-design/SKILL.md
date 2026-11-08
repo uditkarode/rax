@@ -86,6 +86,9 @@ and two tabs stand in for them, so nothing moves when the sessions arrive. The "
 appears only when there are at least two sessions; with one session, the waiting tab's own row is
 enough.
 
+Pulling Home down refreshes it, with Android's circle below the top bar (`LargeTitleScreen`'s
+`onRefresh`). See `rex-protocol` for what a refresh does.
+
 When a newer preview is out, a small accent dot sits on the settings button, and Settings starts
 with a row to install it, which shows the download's progress and says when it failed.
 

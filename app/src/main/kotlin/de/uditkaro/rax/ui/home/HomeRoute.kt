@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import de.uditkaro.rax.update.UpdateState
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -47,6 +49,7 @@ fun HomeRoute(graph: AppGraph, system: SystemActions, open: (Screen) -> Unit) {
     // Tied to Home being on screen, so a reply that comes after the user left opens nothing.
     val scope = rememberCoroutineScope()
     var creating by remember { mutableStateOf(emptySet<String>()) }
+    var refreshing by remember { mutableStateOf(false) }
     val actions = remember(graph, system, signIn, scope) {
         HomeActions(
             openTab = { tab ->
@@ -80,11 +83,33 @@ fun HomeRoute(graph: AppGraph, system: SystemActions, open: (Screen) -> Unit) {
             },
             settings = { currentOpen(Screen.Settings) },
             tailscale = { currentOpen(Screen.Tailscale) },
+            refresh = refresh@{
+                if (refreshing) return@refresh
+                refreshing = true
+                scope.launch {
+                    try {
+                        // The circle stays long enough to be seen, also when every host is fine.
+                        coroutineScope {
+                            launch { graph.refresh() }
+                            delay(MIN_REFRESH_MS)
+                        }
+                    } finally {
+                        refreshing = false
+                    }
+                }
+            },
         )
     }
 
     val update by graph.updater.state.collectAsStateWithLifecycle()
-    HomeScreen(state = home, mono = mono, actions = actions, creating = creating, updateAvailable = update !is UpdateState.None)
+    HomeScreen(
+        state = home,
+        mono = mono,
+        actions = actions,
+        creating = creating,
+        updateAvailable = update !is UpdateState.None,
+        refreshing = refreshing,
+    )
 }
 
 /**
@@ -108,3 +133,5 @@ private class HomeViewModel(private val graph: AppGraph, private val r: Resource
         return build(hosts, graph.connections.states.value, graph.access.value)
     }
 }
+
+private const val MIN_REFRESH_MS = 600L

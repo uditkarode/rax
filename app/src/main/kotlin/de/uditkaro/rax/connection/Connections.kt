@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -169,6 +170,11 @@ class Connections(
         if (usesNode(live.host) && !tailnetUp.value) return
         live.rex.start()
         live.rex.retryNow()
+    }
+
+    /** [RexHost.refresh] on every host that may connect now, and returns when all are done. */
+    suspend fun refresh() = coroutineScope {
+        _live.value.values.filter { canRun(it.host) }.forEach { launch { it.rex.refresh() } }
     }
 
     /** Reconnects now every host that does not go through Tailscale. */

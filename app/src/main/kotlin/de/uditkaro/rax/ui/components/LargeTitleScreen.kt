@@ -26,7 +26,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -50,6 +54,7 @@ private val BarHeight = 56.dp
  * A screen with a large title that scrolls away under a top bar, which then shows the title small.
  * [content] fills a lazy list below the title.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LargeTitleScreen(
     title: String,
@@ -60,6 +65,9 @@ fun LargeTitleScreen(
     actions: @Composable RowScope.() -> Unit = {},
     state: LazyListState = rememberLazyListState(),
     bottomBar: (@Composable () -> Unit)? = null,
+    /** Pull to refresh, with [refreshing] while it runs. */
+    onRefresh: (() -> Unit)? = null,
+    refreshing: Boolean = false,
     content: LazyListScope.() -> Unit,
 ) {
     val c = Rax.colors
@@ -79,25 +87,47 @@ fun LargeTitleScreen(
             } else {
                 24.dp
             }
-            LazyColumn(
-                Modifier.fillMaxSize().windowInsetsPadding(sides),
-                state = state,
-                contentPadding = PaddingValues(top = top, bottom = bottom),
-            ) {
-                item(key = "large-title", contentType = "large-title") {
-                    Text(
-                        title,
-                        Modifier
-                            .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp)
-                            .graphicsLayer { alpha = 1f - barAlpha }
-                            .semantics { heading() },
-                        style = RaxType.largeTitle,
-                        color = c.text,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+            val list = @Composable {
+                LazyColumn(
+                    Modifier.fillMaxSize().windowInsetsPadding(sides),
+                    state = state,
+                    contentPadding = PaddingValues(top = top, bottom = bottom),
+                ) {
+                    item(key = "large-title", contentType = "large-title") {
+                        Text(
+                            title,
+                            Modifier
+                                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp)
+                                .graphicsLayer { alpha = 1f - barAlpha }
+                                .semantics { heading() },
+                            style = RaxType.largeTitle,
+                            color = c.text,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    content()
                 }
-                content()
+            }
+            if (onRefresh == null) {
+                list()
+            } else {
+                val pull = rememberPullToRefreshState()
+                PullToRefreshBox(
+                    isRefreshing = refreshing,
+                    onRefresh = onRefresh,
+                    state = pull,
+                    indicator = {
+                        // Below the top bar, which covers the top of the list.
+                        PullToRefreshDefaults.Indicator(
+                            state = pull,
+                            isRefreshing = refreshing,
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = top),
+                            containerColor = c.card,
+                            color = c.accent,
+                        )
+                    },
+                ) { list() }
             }
 
             Column(Modifier.fillMaxWidth()) {
