@@ -15,6 +15,7 @@ class UpdaterTest {
     fun picksTheHighestPreviewWithAnApk() {
         val json = "[${release("preview-9")}, ${release("preview-11", apk = null)}, ${release("preview-12", draft = true)}, ${release("v2.0")}, ${release("preview-10")}]"
         assertEquals(Release(10, "https://example.com/Rax-preview-10.apk", 1000), newestPreview(json))
+        assertEquals(12, newestPreview("[${release("preview-11")}, ${release("preview-00012")}]")?.number)
     }
 
     @Test

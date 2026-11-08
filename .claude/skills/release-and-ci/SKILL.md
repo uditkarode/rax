@@ -75,8 +75,11 @@ After any rule change, test a release build on a device: R8 problems show up onl
 2. It sets up JDK 21, Go from `tailnet/go/go.mod` and Zig at `minimum_zig_version` in
    `ghostty/native/build.zig.zon`, and restores Zig's cache for the Ghostty build. It writes the
    signing key from the secrets and runs the unit tests and `assembleRelease`.
-3. It publishes the APK as a prerelease named `preview-<run number>`, using the commit message as
-   the notes.
+3. It publishes the APK as a prerelease tagged `preview-<run number>`, with the number padded to
+   five digits (`preview-00012`), and the commit message as the notes. GitHub lists releases by
+   the day of their commit, newest first, and within one day by tag name as text, so without the
+   padding `preview-11` would sort below `preview-6`. Its API uses the same order, and the updater
+   reads only the first page.
 
 ## Updates
 

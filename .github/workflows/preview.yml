@@ -83,7 +83,8 @@ jobs:
           apk="Rax-$VERSION_NAME.apk"
           cp app/build/outputs/apk/release/app-release.apk "$apk"
           git log -1 --format=%B > notes.md
-          gh release create "preview-$VERSION_CODE" "$apk" \
+          # GitHub lists the releases of one day by tag name as text, so the number is padded.
+          gh release create "preview-$(printf '%05d' "$VERSION_CODE")" "$apk" \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Preview $VERSION_CODE ($(git rev-parse --short HEAD))" \
