@@ -32,8 +32,7 @@ import de.uditkaro.rax.ui.components.RaxIcon
 import de.uditkaro.rax.ui.components.RenameDialog
 import de.uditkaro.rax.ui.components.RowBase
 import de.uditkaro.rax.ui.components.SectionHeader
-import io.github.sagernet.libghostty.GhosttyExtraKeysState
-import io.github.sagernet.libghostty.GhosttyTerminalView
+import io.github.xchacha20_poly1305.libghostty.compose.GhosttyTerminalState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -141,7 +140,7 @@ private fun SheetRow(icon: Int, text: String, destructive: Boolean = false, onCl
 /** The keys that do not fit on the bar. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun MoreKeysSheet(view: GhosttyTerminalView?, extraKeys: GhosttyExtraKeysState, onDismiss: () -> Unit) {
+fun MoreKeysSheet(terminal: GhosttyTerminalState, onDismiss: () -> Unit) {
     val c = Rax.colors
     val keys = listOf(
         TermKey.Tab, TermKey.ShiftTab, TermKey.CtrlC, TermKey.CtrlD, TermKey.CtrlZ, TermKey.CtrlL, TermKey.CtrlR,
@@ -160,12 +159,12 @@ fun MoreKeysSheet(view: GhosttyTerminalView?, extraKeys: GhosttyExtraKeysState, 
                     label = key.label ?: key.name,
                     height = 48.dp,
                     repeat = key == TermKey.Left || key == TermKey.Right,
-                    onTap = { view?.press(key) },
+                    onTap = { terminal.press(key) },
                 )
             }
             Key(stringResource(R.string.key_paste), height = 48.dp, onTap = {
                 onDismiss()
-                view?.pasteFromClipboard()
+                terminal.paste()
             })
         }
     }

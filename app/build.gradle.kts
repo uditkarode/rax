@@ -88,6 +88,7 @@ kotlin {
 dependencies {
     implementation(project(":rex"))
     implementation(project(":tailnet"))
+    implementation(project(":ghostty"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
@@ -112,8 +113,6 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.ghostty)
-    implementation(libs.ghostty.compose)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

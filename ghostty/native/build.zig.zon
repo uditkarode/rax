@@ -1,0 +1,17 @@
+.{
+    .name = .ghostty_jni,
+    .version = "0.0.0",
+    .fingerprint = 0x14355953d3f4996b,
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        // Patched checkout made by `build-native.sh source`.
+        .ghostty = .{ .path = "../build/ghostty-source" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "android.zig",
+        "jni.map",
+        "src",
+    },
+}

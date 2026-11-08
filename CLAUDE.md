@@ -29,9 +29,10 @@ pane on it. Anything that changes state runs against the isolated test server
   in-band messages.
 - `:tailnet`: Rax's own Tailscale node, Go `tsnet` bound with gomobile. Rax reaches tailnet hosts
   without the Tailscale app and without a VPN. `tailnet/README.md` describes it in detail.
+- `:ghostty`: the terminal emulator and its Compose UI. It is libghostty-cmp with Rax's changes,
+  over Ghostty's libghostty-vt built with Zig. `ghostty/README.md` describes it.
 - `:app`: the Compose UI, `Connections` (one `RexHost` per saved host), notifications (`Alerts`,
-  `AlertService`), the terminal (libghostty-android), themes and fonts. `AppGraph` holds the
-  app-wide objects.
+  `AlertService`), the terminal screen, themes and fonts. `AppGraph` holds the app-wide objects.
 
 ## How it works
 
@@ -40,19 +41,20 @@ attaches every session, reads each pane's facts (title, directory, process, prog
 then keeps all of it current from events, on one coroutine, so the UI always shows a state the
 server had. Home is built from these states. Opening a pane starts a `TerminalStream`: a ticket
 from the control connection, a binary data WebSocket, a GHOSTSNP snapshot of the screen, then live
-output. libghostty-android restores the snapshot into an emulator and draws it. While the pane is
+output. `:ghostty` restores the snapshot into an emulator and draws it. While the pane is
 on screen the phone owns it, so its size applies, and it releases the pane when it leaves.
 Connections stay up while Rax is in the foreground, and in the background only while background
 alerts are on, which runs a foreground service.
 
 ## Build and test
 
-JDK 21, the Android SDK with platform 37, the NDK in `gradle/libs.versions.toml`, and Go at the
-version in `tailnet/go/go.mod`. The first build also builds the Go library.
+JDK 21, the Android SDK with platform 37, the NDK in `gradle/libs.versions.toml`, Go at the
+version in `tailnet/go/go.mod`, and Zig at `minimum_zig_version` in
+`ghostty/native/build.zig.zon`. The first build also builds the Go library and Ghostty.
 
 ```
 ./gradlew :app:assembleDebug
-./gradlew :rex:test :app:testDebugUnitTest
+./gradlew :rex:test :ghostty:testDebugUnitTest :app:testDebugUnitTest
 ```
 
 The debug build has the application ID `de.uditkaro.rax.debug`, so it installs next to a release
@@ -96,7 +98,7 @@ Load the matching skill before working in one of these areas:
   what to do when Rex updates.
 - `pane-pipeline`: how an open pane goes from the data stream to the screen and back, and the
   loading, live, reconnecting and failed states.
-- `terminal-rendering`: how libghostty-android draws, font fallback and glyph coverage, themes, and
+- `terminal-rendering`: how `:ghostty` draws, font fallback and glyph coverage, themes, and
   snapshot compatibility.
 - `tailnet`: the in-app Tailscale node and how hosts on a tailnet are found and reached.
 - `testing-against-rex`: the isolated Rex server, the emulator, and how to reproduce network

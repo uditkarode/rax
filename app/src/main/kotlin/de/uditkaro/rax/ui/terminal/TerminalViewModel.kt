@@ -18,7 +18,7 @@ import de.uditkaro.rax.ui.home.Access
 import de.uditkaro.rax.ui.home.Link
 import de.uditkaro.rax.ui.home.Need
 import de.uditkaro.rax.ui.home.hostLink
-import io.github.sagernet.libghostty.GhosttyTerminalSession
+import io.github.xchacha20_poly1305.libghostty.GhosttyTerminalSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -235,13 +235,12 @@ class TerminalViewModel(
         when (e) {
             is TerminalStream.Event.Loading -> loaded.value = e.bytes
             is TerminalStream.Event.Started -> {
-                val ctx = getApplication<Application>()
                 val snapshot = e.snapshot
-                val restored = snapshot?.let { GhosttyTerminalSession.restore(ctx, it, options()) }
+                val restored = snapshot?.let { GhosttyTerminalSession.restore(it, options()) }
                 if (snapshot != null && restored == null) {
                     Log.w(TAG, "snapshot did not restore, ${snapshot.size} bytes; redrawing from the screen")
                 }
-                val session = restored ?: GhosttyTerminalSession(ctx, options())
+                val session = restored ?: GhosttyTerminalSession(options())
                 session.transport = transport(target, paneInput)
                 // A new data connection can come from a new client, which starts with Rex's colours.
                 theme?.let(paneInput::setTheme)

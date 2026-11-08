@@ -46,7 +46,7 @@ import de.uditkaro.rax.ui.components.RaxSlider
 import de.uditkaro.rax.ui.components.SectionHeader
 import de.uditkaro.rax.activeTheme
 import de.uditkaro.rax.ui.terminal.TerminalPreview
-import de.uditkaro.rax.ui.terminal.rememberTerminalTypeface
+import de.uditkaro.rax.ui.terminal.rememberTerminalFont
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -65,7 +65,7 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
 
     // The slider moves the preview live and writes the size when the finger lifts.
     var size by remember(s.fontSize) { mutableFloatStateOf(s.fontSize) }
-    val typeface = rememberTerminalTypeface(graph, s.fontId)
+    val terminalFont = rememberTerminalFont(graph, s.fontId)
 
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
@@ -91,7 +91,7 @@ fun FontScreen(graph: AppGraph, onBack: () -> Unit) {
                     .border(1.dp, Rax.colors.stroke, RoundedCornerShape(16.dp))
                     .padding(horizontal = 14.dp, vertical = 12.dp),
             ) {
-                if (typeface != null) TerminalPreview(typeface, size, theme.terminal)
+                if (terminalFont != null) TerminalPreview(terminalFont, size, theme.terminal)
             }
         }
         item(key = "size") {

@@ -1,0 +1,5 @@
+/* The JVM only needs JNI_OnLoad; natives are registered from there. */
+{
+    global: JNI_OnLoad;
+    local: *;
+};

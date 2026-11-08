@@ -22,4 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "rax"
 
-include(":app", ":rex", ":tailnet")
+include(":app", ":rex", ":tailnet", ":ghostty")

@@ -19,11 +19,11 @@ fun rememberTerminalFontFamily(graph: AppGraph, fontId: String): FontFamily {
     return remember(typeface) { typeface?.let { FontFamily(it) } ?: FontFamily.Monospace }
 }
 
-/** The terminal font's full family for the terminal view, or null while it loads. */
+/** The terminal font's full family, with its fallback fonts, or null while it loads. */
 @Composable
-fun rememberTerminalTypeface(graph: AppGraph, fontId: String): Typeface? {
+fun rememberTerminalFont(graph: AppGraph, fontId: String): FontFamily? {
     val typeface by produceState<Typeface?>(null, fontId) {
         value = withContext(Dispatchers.IO) { graph.fonts.typeface(fontId) }
     }
-    return typeface
+    return remember(typeface) { typeface?.let { FontFamily(it) } }
 }

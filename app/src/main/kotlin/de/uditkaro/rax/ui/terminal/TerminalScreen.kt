@@ -46,11 +46,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
@@ -70,8 +72,10 @@ import de.uditkaro.rax.ui.components.RaxIcon
 import de.uditkaro.rax.ui.home.appName
 import de.uditkaro.rax.ui.home.shortPath
 import de.uditkaro.rax.ui.home.tabRow
-import io.github.sagernet.libghostty.compose.GhosttyTerminal
-import io.github.sagernet.libghostty.compose.rememberGhosttyTerminalState
+import io.github.xchacha20_poly1305.libghostty.compose.GhosttyDialogs
+import io.github.xchacha20_poly1305.libghostty.compose.GhosttyTerminal
+import io.github.xchacha20_poly1305.libghostty.compose.rememberGhosttyExtraKeysState
+import io.github.xchacha20_poly1305.libghostty.compose.rememberGhosttyTerminalState
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -88,8 +92,14 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
     val s = settings ?: return
     val theme = activeTheme(s, themes ?: return)
     LaunchedEffect(vm, theme) { vm.setTheme(theme.terminal.toPane(theme.dark)) }
-    val typeface = rememberTerminalTypeface(graph, s.fontId)
+    val font = rememberTerminalFont(graph, s.fontId)
     val terminalState = rememberGhosttyTerminalState()
+    val extraKeys = rememberGhosttyExtraKeysState()
+    DisposableEffect(terminalState, extraKeys) {
+        terminalState.stickyModifiers = extraKeys
+        onDispose { terminalState.stickyModifiers = null }
+    }
+    val rootView = LocalView.current
     val scope = rememberCoroutineScope()
 
     var actions by remember { mutableStateOf(false) }
@@ -136,26 +146,26 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
             onActions = { actions = true },
         )
 
-        // The terminal view draws its background outside its own area. The clip stops it from covering the top bar.
+        // Keeps the terminal from drawing over the top bar.
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
-            if (session != null && typeface != null) {
+            if (session != null && font != null) {
                 GhosttyTerminal(
                     session = session,
                     state = terminalState,
                     modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
-                    theme = theme.terminal.toGhostty(),
+                    theme = remember(theme) { theme.terminal.toGhostty() },
                     darkColorScheme = theme.dark,
-                    typeface = typeface,
-                    fontSizeSp = s.fontSize,
+                    fontFamily = font,
+                    fontSize = s.fontSize.sp,
                     focusOnAttach = false,
-                    onFontSizeChanged = { size -> graph.updateSettings { setFontSize(size) } },
+                    onFontSizeChanged = { size -> graph.updateSettings { setFontSize(size.value) } },
                 )
             }
             PaneOverlay(
                 // The pane can be ready before its font has loaded.
-                view = if (typeface == null && (view == PaneView.Live || view == PaneView.Reconnecting)) PaneView.Loading(false, 0) else view,
+                view = if (font == null && (view == PaneView.Live || view == PaneView.Reconnecting)) PaneView.Loading(false, 0) else view,
                 hostName = vm.live?.host?.name.orEmpty(),
-                hasScreen = session != null && typeface != null,
+                hasScreen = session != null && font != null,
                 onRetry = vm::retry,
                 onUseHere = vm::useHere,
                 onBack = onBack,
@@ -164,11 +174,9 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
 
         if (imeVisible) {
             KeyBar(
-                view = terminalState.view,
-                extraKeys = terminalState.extraKeys,
-                onHideKeyboard = {
-                    terminalState.view?.let { v -> ViewCompat.getWindowInsetsController(v)?.hide(WindowInsetsCompat.Type.ime()) }
-                },
+                terminal = terminalState,
+                extraKeys = extraKeys,
+                onHideKeyboard = { ViewCompat.getWindowInsetsController(rootView)?.hide(WindowInsetsCompat.Type.ime()) },
             )
         } else {
             Column(
@@ -182,8 +190,8 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
                     })
                 }
                 Dock(
-                    view = terminalState.view,
-                    onKeyboard = { terminalState.view?.showIme() },
+                    terminal = terminalState,
+                    onKeyboard = terminalState::showKeyboard,
                     onMore = { moreKeys = true },
                 )
             }
@@ -204,8 +212,10 @@ fun TerminalScreen(graph: AppGraph, vm: TerminalViewModel, onBack: () -> Unit) {
         )
     }
     if (moreKeys) {
-        MoreKeysSheet(terminalState.view, terminalState.extraKeys, onDismiss = { moreKeys = false })
+        MoreKeysSheet(terminalState, onDismiss = { moreKeys = false })
     }
+    // Asks before an unsafe paste or a program's clipboard read, and offers a tapped link.
+    GhosttyDialogs(terminalState)
 }
 
 @Composable

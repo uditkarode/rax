@@ -6,9 +6,9 @@ description: How an open pane goes from Rex's data stream to the screen and back
 # From data stream to screen
 
 The chain is `TerminalStream` (`:rex`) → `TerminalViewModel` → `GhosttyTerminalSession` (the
-libghostty-android emulator) → the `GhosttyTerminal` composable, which hosts a
-`GhosttyTerminalView`. One `TerminalViewModel` belongs to one terminal screen. It shows one pane at
-a time and can switch panes.
+`:ghostty` emulator) → the `GhosttyTerminal` composable, which draws it. The key bar sends keys
+through the composable's `GhosttyTerminalState`. One `TerminalViewModel` belongs to one terminal
+screen. It shows one pane at a time and can switch panes.
 
 ## Threads
 
@@ -23,10 +23,10 @@ a time and can switch panes.
 ## Starting a stream
 
 1. `Event.Loading(bytes)` arrives while the snapshot downloads. A pane with long scrollback can
-   send tens of megabytes, and libghostty-android restores a snapshot only in one piece, so the
-   whole snapshot must arrive first.
+   send tens of megabytes, and `GhosttyTerminalSession.restore` decodes a snapshot only in one
+   piece, so the whole snapshot must arrive first.
 2. `Event.Started(snapshot)`: `GhosttyTerminalSession.restore` decodes it. It returns null when
-   libghostty-android cannot read Rex's snapshot format (see `terminal-rendering`). Rax then makes
+   `:ghostty` cannot read Rex's snapshot format (see `terminal-rendering`). Rax then makes
    an empty emulator and asks Rex for the screen as escape sequences: the pane's `format` method
    with `format: vt`, all the `extra_*` flags, and a size limit.
 3. Status becomes Live. Every later `Started` (a stream that could not resume) builds a new
@@ -37,7 +37,7 @@ a time and can switch panes.
 - The emulator's transport sends typing through `PaneInput.send`. Anything it sends while Rax
   feeds it output is a reply to a terminal query, and Rax drops it (a `ThreadLocal` flag), because
   Rex's own terminal already replied.
-- When the view's grid changes, it calls `sendResize`. Rax sends the size, and if the pane is
+- When the terminal's grid changes, the session calls `sendResize`. Rax sends the size, and if the pane is
   visible and not owned elsewhere, it asks to own the pane.
 - Rax sends the active terminal colours and whether the theme is light or dark with `set_theme`
   when a pane opens, on each new data connection, and when the theme changes. Like the size, Rex
@@ -86,9 +86,9 @@ before its font.
 shows while the new one loads. When the shown pane closes (status `Closed`), the ViewModel moves to
 another pane of the tab, or to another tab.
 
-## libghostty-android rules
+## `:ghostty` rules
 
-- A session can be attached to one view at a time. Attaching it to a second view throws
-  "session is already attached to another view".
+- A session can be shown by one `GhosttyTerminal` at a time. Attaching it to a second one throws
+  "session is already attached to another host".
 - `close()` frees the native terminal later, on the main thread.
 - `TerminalPreview` in the settings makes its own sessions, apart from any pane.

@@ -1,0 +1,25 @@
+diff --git a/src/lib/tinyio/posix.zig b/src/lib/tinyio/posix.zig
+--- a/src/lib/tinyio/posix.zig
++++ b/src/lib/tinyio/posix.zig
+@@ -16,8 +16,12 @@
+ const lseek_sym = if (posix.lfs64_abi) posix.system.lseek64 else posix.system.lseek;
+ const preadv_sym = if (posix.lfs64_abi) posix.system.preadv64 else posix.system.preadv;
+ 
++const pread_sym = if (posix.lfs64_abi) posix.system.pread64 else posix.system.pread;
++
+ const have_preadv = switch (builtin.target.os.tag) {
+     .haiku => false,
++    // Bionic gained preadv in API 24.
++    .linux => !builtin.target.abi.isAndroid() or builtin.target.os.version_range.linux.android >= 24,
+     else => true,
+ };
+ 
+@@ -210,7 +214,7 @@
+         const rc = if (comptime have_preadv)
+             preadv_sym(file.handle, dest.ptr, @intCast(dest.len), @bitCast(offset))
+         else
+-            posix.system.pread(file.handle, dest[0].base, dest[0].len, @bitCast(offset));
++            pread_sym(file.handle, dest[0].base, dest[0].len, @bitCast(offset));
+         switch (posix.errno(rc)) {
+             .SUCCESS => return @bitCast(rc),
+             .INTR, .TIMEDOUT => continue,

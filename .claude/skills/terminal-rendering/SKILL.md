@@ -1,21 +1,22 @@
 ---
 name: terminal-rendering
-description: How the terminal is drawn and how it looks. Covers how libghostty-android sizes cells and draws glyphs, the font fallback chain and how to check glyph coverage, bundled and imported fonts, Rex themes and how app colours come from them, the UI font, and why Rex's snapshots can stop restoring. Use when glyphs show as emoji, boxes or gaps, when changing fonts or themes, or when snapshots fail to restore.
+description: How the terminal is drawn and how it looks. Covers how `:ghostty` sizes cells and draws glyphs, the font fallback chain and how to check glyph coverage, bundled and imported fonts, Rex themes and how app colours come from them, the UI font, and why Rex's snapshots can stop restoring. Use when glyphs show as emoji, boxes or gaps, when changing fonts or themes, or when snapshots fail to restore.
 ---
 
 # Terminal rendering
 
-## How libghostty-android draws
+## How `:ghostty` draws
 
-- It draws each cell with `Canvas.drawText` and an Android `Paint` that uses the chosen
-  `Typeface`. Desktop Ghostty draws box drawing and block elements itself, but this library does
-  not: every glyph comes from a font.
+- `AndroidGlyphPainter` (`ghostty/.../compose/Platform.kt`) draws each cell with
+  `Canvas.drawText` and an Android `Paint` that uses the chosen `Typeface`, which Rax passes as a
+  Compose `FontFamily`. Desktop Ghostty draws box drawing and block elements itself, but
+  `:ghostty` does not: every glyph comes from a font.
 - Cell width is `measureText("M")`, and cell height is `ceil(descent - ascent)` of the base font.
   `Paint.getFontMetrics` uses only the first font of a fallback typeface.
 - Because of that, a glyph from a fallback font draws at that font's size, and block elements such
   as `█` fill the cell only if the font's glyph spans its whole line height. In several fonts it
-  does not, so stacked blocks (Claude Code's logo, for example) show thin gaps between rows. Rax
-  cannot fix this without changes in the library.
+  does not, so stacked blocks (Claude Code's logo, for example) show thin gaps between rows. The
+  fix is a change in `AndroidGlyphPainter`.
 
 ## Font fallback
 
@@ -71,13 +72,16 @@ optical-size axes. A Compose `FontFamily` can pick faces only by weight, so ther
 ## Snapshot compatibility
 
 - Rex sends libghostty's GHOSTSNP snapshot at the start of each stream. Rex has libghostty built
-  in as a Go module (the version is in `docs/rex-schema/deps.txt`), and libghostty-android builds
-  its own copy of Ghostty. The two versions can drift apart.
+  in as a Go module (the version is in `docs/rex-schema/deps.txt`), and `:ghostty` builds Ghostty
+  at the commit in `ghostty/GHOSTTY_COMMIT`. The two versions can drift apart.
 - libghostty-vt 1.0 made its C API stable but not the snapshot format: "Snapshot format version 1
   is a work in progress and doesn't carry a binary-compatibility guarantee."
 - When the versions disagree, `restore` returns null and Rax asks Rex for the screen as escape
   sequences instead (see `pane-pipeline`). The pane still works, but scrollback from before the
-  pane was opened is limited to what that call returns.
+  pane was opened is limited to what that call returns. The fix is to move `GHOSTTY_COMMIT` to a
+  Ghostty that reads the new format (`ghostty/README.md`).
+- `GhosttySnapshotTest` in `:ghostty` restores a snapshot that Rex sent, so a Ghostty update that
+  breaks Rex's format fails the tests.
 - Rax's own `StreamParser` reads only the envelope: the `GHOSTSNP` magic and a u16 version, then
   records of u16 tag, u32 length, u32 CRC and payload, little-endian, until the record tagged 6
   (FINISH). Newer libghostty versions add record types that older decoders skip, so the envelope

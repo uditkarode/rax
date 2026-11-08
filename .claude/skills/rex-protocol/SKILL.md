@@ -143,5 +143,6 @@ servers on the tailnet by probing `/api/control` on each peer: a WebSocket endpo
 2. For exit 1, read the diff and update `:rex`. Then record the new state with
    `rex-schema.sh snapshot`.
 3. Look at the libghostty version in `docs/rex-schema/deps.txt`. When it changes, the snapshot
-   format can change too (see the `terminal-rendering` skill).
+   format can change too. Capture a new test snapshot for `:ghostty` (`ghostty/README.md`) and see
+   the `terminal-rendering` skill.
 4. Run `LiveServerTest` against the isolated server (see `testing-against-rex`).

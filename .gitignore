@@ -10,3 +10,6 @@ keystore.properties
 .DS_Store
 __pycache__/
 /tailnet/libs/
+/ghostty/native/zig-pkg/
+.zig-cache/
+zig-out/

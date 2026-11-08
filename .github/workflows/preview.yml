@@ -30,6 +30,24 @@ jobs:
           go-version-file: tailnet/go/go.mod
           cache-dependency-path: tailnet/go/go.sum
 
+      - name: Read the Zig version
+        id: zig
+        run: echo "version=$(sed -n 's/^ *\.minimum_zig_version = "\(.*\)",$/\1/p' ghostty/native/build.zig.zon)" >> "$GITHUB_OUTPUT"
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
+          # build-native.sh keeps Zig's cache in its own directory, cached below.
+          use-cache: false
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ghostty/build/zig-cache
+            ghostty/native/zig-pkg
+          key: zig-${{ steps.zig.outputs.version }}-${{ hashFiles('ghostty/GHOSTTY_COMMIT', 'ghostty/patches/*.patch', 'ghostty/native/*.zig', 'ghostty/native/build.zig.zon', 'ghostty/native/src/**') }}
+          restore-keys: zig-${{ steps.zig.outputs.version }}-
+
       - name: Install Android SDK packages
         run: |
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -52,7 +70,7 @@ jobs:
 
       - name: Test and build
         run: >-
-          ./gradlew :rex:test :app:testDebugUnitTest :app:assembleRelease
+          ./gradlew :rex:test :ghostty:testDebugUnitTest :app:testDebugUnitTest :app:assembleRelease
           -Prax.versionCode="$VERSION_CODE" -Prax.versionName="$VERSION_NAME"
 
       - name: Publish the preview

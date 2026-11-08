@@ -462,11 +462,11 @@ then records until tag 6:
 | Fresh shell, 80×24 | `1 2 3 7 5 4 6` | 1 157 bytes |
 | 30 000 lines of scrollback, alternate screen on | `1 2 3 2 3 7 5 4 3×50 4 6` | 233 735 bytes over 4 WebSocket messages |
 
-Tag names are **(unconfirmed)**. Third-party descriptions of upstream Ghostty name the records
-TERMINAL, SCREEN, CONTINUATION/page, READY, HISTORY and FINISH. The observed order fits:
-1 terminal, 2 screen (one per screen, primary then alternate), 3 page data, 5 ready, 4 history,
-3 history pages, 6 finish. Tag 6 was last in every capture, and the first in-band `resize` message
-starts at the byte after it.
+Tag names, from Ghostty's `src/terminal/snapshot/record.zig`: 1 TERMINAL, 2 SCREEN, 3 PAGE,
+4 HISTORY, 5 READY, 6 FINISH, 7 CONTINUATION. A snapshot is TERMINAL, then a SCREEN with its PAGE
+records for each screen, CONTINUATION, READY, a HISTORY with its PAGE records for each screen, and
+FINISH. The payload layouts are in Ghostty's `src/terminal/snapshot/snapshot.ksy`. The first in-band
+`resize` message starts at the byte after FINISH.
 
 Decoding the payloads needs libghostty-vt at the version the server uses. Upstream calls snapshot v1
 not binary-stable, and it has changed without a version bump (third-party reports). The server's
@@ -474,6 +474,8 @@ libghostty Go module version is in its build info (section 10). For Android:
 
 - SagerNet/libghostty-android exposes GHOSTSNP restore (public PR "expose GHOSTSNP terminal snapshots").
 - The existing client feeds the snapshot to `io.github.sagernet:libghostty-android:0.1.0-alpha02` **(existing client only)**.
+- Rax's `:ghostty` decodes it with Ghostty's `snapshot.decode` at Ghostty `df246d0`, which reads the
+  snapshots of Rex 0.0.1793890641 (libghostty `df1957c`). `GhosttySnapshotTest` restores one.
 
 Fallback without a decoder: find the snapshot end by walking the records (or by scanning for
 `ESC _ rex1;<nonce>;`), drop the snapshot, then draw the initial screen from
@@ -896,14 +898,13 @@ All in `tools/rex-probe/`, run with a Python that has `websockets` (tested with 
 
 ## 13. Open questions
 
-1. GHOSTSNP record tag names and payload layouts. Only the framing is confirmed. Whether libghostty-android's decoder matches libghostty df1957c is untested here.
-2. Exact QR payload of `rex server tailscale pair`.
-3. How Rex.app reacts when a phone takes ownership (gives up, or takes back on focus). Same for Rex for iOS.
-4. How the Mac app names its Tailscale device (`laptop-rex` observed on a Mac named `laptop`).
-5. Keepalive timings, the 60 s client resume window, the 8 MiB event backlog limit and the 512-byte hello limit come from the server doc and were not exercised (a 600-byte hello was accepted).
-6. Mouse `button` names beyond `left`, `middle`, `right`, `four`.
-7. `carriers` (QUIC) and `features`: defined in the welcome schema, not sent by this server on TCP or Tailscale. When a server sends a carrier, its use is undocumented beyond port and ALPN.
-8. Whether a TCP data RESUME can succeed after a real network loss, given that any unread byte makes the server reject it (5.8).
+1. Exact QR payload of `rex server tailscale pair`.
+2. How Rex.app reacts when a phone takes ownership (gives up, or takes back on focus). Same for Rex for iOS.
+3. How the Mac app names its Tailscale device (`laptop-rex` observed on a Mac named `laptop`).
+4. Keepalive timings, the 60 s client resume window, the 8 MiB event backlog limit and the 512-byte hello limit come from the server doc and were not exercised (a 600-byte hello was accepted).
+5. Mouse `button` names beyond `left`, `middle`, `right`, `four`.
+6. `carriers` (QUIC) and `features`: defined in the welcome schema, not sent by this server on TCP or Tailscale. When a server sends a carrier, its use is undocumented beyond port and ALPN.
+7. Whether a TCP data RESUME can succeed after a real network loss, given that any unread byte makes the server reject it (5.8).
 
 ## Sources
 

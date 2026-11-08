@@ -1,0 +1,14 @@
+diff --git a/src/terminal/page.zig b/src/terminal/page.zig
+--- a/src/terminal/page.zig
++++ b/src/terminal/page.zig
+@@ -1996,8 +1996,8 @@
+     /// cells in the page: the page size minus the metadata block.
+     fn availableBytesForGrid(self: Capacity) usize {
+         comptime {
+-            assert(cells_align % Page.MetaLayout.alignment == 0);
+-            assert(@sizeOf(Cell) % Page.MetaLayout.alignment == 0);
++            assert(cells_align % @as(usize, Page.MetaLayout.alignment) == 0);
++            assert(@sizeOf(Cell) % @as(usize, Page.MetaLayout.alignment) == 0);
+         }
+ 
+         const l = Page.layout(self);

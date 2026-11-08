@@ -43,7 +43,7 @@ Rex servers it finds, and you tap one to add it.
 
 ## Credits
 
-Rax draws the terminal with [libghostty-android](https://github.com/SagerNet/libghostty-android)
+Rax draws the terminal with [libghostty-cmp](https://github.com/xchacha20-poly1305/libghostty-cmp)
 and [Ghostty](https://ghostty.org), connects over [Tailscale](https://github.com/tailscale/tailscale),
 and shows program logos from [Simple Icons](https://simpleicons.org) and
 [Lobe Icons](https://github.com/lobehub/lobe-icons). The color themes come from

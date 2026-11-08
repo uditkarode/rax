@@ -47,16 +47,16 @@ import de.uditkaro.rax.R
 import de.uditkaro.rax.theme.Rax
 import de.uditkaro.rax.theme.RaxType
 import de.uditkaro.rax.ui.components.RaxIcon
-import io.github.sagernet.libghostty.GhosttyExtraKeysState
-import io.github.sagernet.libghostty.GhosttyExtraKeysState.StickyState
-import io.github.sagernet.libghostty.GhosttyTerminalView
+import io.github.xchacha20_poly1305.libghostty.compose.GhosttyExtraKeysState
+import io.github.xchacha20_poly1305.libghostty.compose.GhosttyExtraKeysState.StickyState
+import io.github.xchacha20_poly1305.libghostty.compose.GhosttyTerminalState
 
 /**
  * A tap on Ctrl or Alt applies it to the next key, and a double tap keeps it on. Arrows repeat
  * while held. Holding Tab sends Shift+Tab.
  */
 @Composable
-fun KeyBar(view: GhosttyTerminalView?, extraKeys: GhosttyExtraKeysState, onHideKeyboard: () -> Unit, modifier: Modifier = Modifier) {
+fun KeyBar(terminal: GhosttyTerminalState, extraKeys: GhosttyExtraKeysState, onHideKeyboard: () -> Unit, modifier: Modifier = Modifier) {
     val c = Rax.colors
     val ctrl by extraKeys.ctrl.collectAsState()
     val alt by extraKeys.alt.collectAsState()
@@ -68,14 +68,14 @@ fun KeyBar(view: GhosttyTerminalView?, extraKeys: GhosttyExtraKeysState, onHideK
             Modifier.weight(1f).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Key("esc", onTap = { view?.press(TermKey.Esc) })
+            Key("esc", onTap = { terminal.press(TermKey.Esc) })
             Key("ctrl", state = ctrl, onTap = { extraKeys.toggleCtrl() })
             Key("alt", state = alt, onTap = { extraKeys.toggleAlt() })
-            Key("tab", onTap = { view?.press(TermKey.Tab) }, onHold = { view?.press(TermKey.ShiftTab) })
-            Key(icon = R.drawable.ic_keyboard_arrow_left, label = stringResource(R.string.key_left), repeat = true, onTap = { view?.press(TermKey.Left) })
-            Key(icon = R.drawable.ic_keyboard_arrow_up, label = stringResource(R.string.key_up), repeat = true, onTap = { view?.press(TermKey.Up) })
-            Key(icon = R.drawable.ic_keyboard_arrow_down, label = stringResource(R.string.key_down), repeat = true, onTap = { view?.press(TermKey.Down) })
-            Key(icon = R.drawable.ic_keyboard_arrow_right, label = stringResource(R.string.key_right), repeat = true, onTap = { view?.press(TermKey.Right) })
+            Key("tab", onTap = { terminal.press(TermKey.Tab) }, onHold = { terminal.press(TermKey.ShiftTab) })
+            Key(icon = R.drawable.ic_keyboard_arrow_left, label = stringResource(R.string.key_left), repeat = true, onTap = { terminal.press(TermKey.Left) })
+            Key(icon = R.drawable.ic_keyboard_arrow_up, label = stringResource(R.string.key_up), repeat = true, onTap = { terminal.press(TermKey.Up) })
+            Key(icon = R.drawable.ic_keyboard_arrow_down, label = stringResource(R.string.key_down), repeat = true, onTap = { terminal.press(TermKey.Down) })
+            Key(icon = R.drawable.ic_keyboard_arrow_right, label = stringResource(R.string.key_right), repeat = true, onTap = { terminal.press(TermKey.Right) })
         }
         Spacer(Modifier.width(6.dp))
         Key(icon = R.drawable.ic_keyboard_hide, label = stringResource(R.string.key_hide_keyboard), onTap = onHideKeyboard, plain = true)
@@ -176,7 +176,7 @@ private const val REPEAT_MS = 60L
 /** The keys a pane needs most without the keyboard: answering a prompt, moving through a menu. */
 @Composable
 fun Dock(
-    view: GhosttyTerminalView?,
+    terminal: GhosttyTerminalState,
     onKeyboard: () -> Unit,
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
@@ -191,16 +191,16 @@ fun Dock(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Key(icon = R.drawable.ic_keyboard, label = stringResource(R.string.key_show_keyboard), plain = true, height = 48.dp, onTap = onKeyboard)
-        Key("esc", plain = true, height = 48.dp, onTap = { view?.press(TermKey.Esc) })
-        Key(icon = R.drawable.ic_keyboard_arrow_up, label = stringResource(R.string.key_up), plain = true, repeat = true, height = 48.dp, onTap = { view?.press(TermKey.Up) })
-        Key(icon = R.drawable.ic_keyboard_arrow_down, label = stringResource(R.string.key_down), plain = true, repeat = true, height = 48.dp, onTap = { view?.press(TermKey.Down) })
+        Key("esc", plain = true, height = 48.dp, onTap = { terminal.press(TermKey.Esc) })
+        Key(icon = R.drawable.ic_keyboard_arrow_up, label = stringResource(R.string.key_up), plain = true, repeat = true, height = 48.dp, onTap = { terminal.press(TermKey.Up) })
+        Key(icon = R.drawable.ic_keyboard_arrow_down, label = stringResource(R.string.key_down), plain = true, repeat = true, height = 48.dp, onTap = { terminal.press(TermKey.Down) })
         Key(
             icon = R.drawable.ic_keyboard_return,
             label = stringResource(R.string.key_enter),
             accent = true,
             height = 48.dp,
             modifier = Modifier.size(48.dp),
-            onTap = { view?.press(TermKey.Enter) },
+            onTap = { terminal.press(TermKey.Enter) },
         )
         Key(icon = R.drawable.ic_keyboard_command_key, label = stringResource(R.string.key_more), plain = true, height = 48.dp, onTap = onMore)
     }

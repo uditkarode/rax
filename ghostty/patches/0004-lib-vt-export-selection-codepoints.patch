@@ -1,0 +1,13 @@
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -63,6 +63,9 @@
+ pub const page = terminal.page;
+ pub const parse_table = terminal.parse_table;
+ pub const search = terminal.search;
++/// Default codepoint sets for word and line selection, so embedders
++/// calling `Screen.selectWord` can use the same boundaries as Ghostty.
++pub const selection_codepoints = @import("terminal/selection_codepoints.zig");
+ pub const sgr = terminal.sgr;
+ pub const size = terminal.size;
+ pub const snapshot = terminal.snapshot;
