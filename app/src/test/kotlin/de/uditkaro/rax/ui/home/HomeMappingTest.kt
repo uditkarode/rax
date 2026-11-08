@@ -104,6 +104,17 @@ class HomeMappingTest {
     }
 
     @Test
+    fun aTailnetHostThroughTheTailscaleAppIgnoresTheAppsOwnNode() {
+        val host = Host(name = "h", address = "studio.tail1234.ts.net", tailnet = true)
+        val signedOut = TailnetStatus.NeedsLogin("https://login.tailscale.com/a/x")
+        assertEquals(Link.Blocked(Need.TailscaleSignIn), hostLink(r, host, null, Access(signedOut, localNetwork = true)))
+        val viaApp = Access(signedOut, localNetwork = false, tailscaleApp = true)
+        assertEquals(Link.Connecting, hostLink(r, host, null, viaApp))
+        val down = HostState(link = RexClient.State.Down(Problem.Unreachable("timeout"), 2000, attempt = 3, failingMs = 3_500))
+        assertEquals(Link.Offline("#${R.string.problem_unreachable_tailscale_app}"), hostLink(r, host, down, viaApp))
+    }
+
+    @Test
     fun anAddressThatDoesNotParseSaysSo() {
         val link = hostLink(r, Host(name = "h", address = "kuro-rex", tailnet = true), null, access)
         assertEquals(Link.Offline("#${R.string.host_invalid_short_tailnet}", retryable = false), link)

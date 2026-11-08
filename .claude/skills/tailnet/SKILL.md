@@ -23,6 +23,22 @@ Consequences:
   one. `Connections` picks the client per host.
 - The node shows up as its own device in the user's Tailscale admin console, and an admin may have
   to approve it (`TailnetStatus.NeedsApproval`).
+
+## The Tailscale app instead
+
+A user whose phone already runs the Tailscale app can turn on "Use the Tailscale app" on the
+Tailscale screen (`Settings.tailscaleApp`). Then:
+
+- Tailnet hosts use the plain client, and their traffic goes through the Tailscale app's VPN like
+  any other app's. `Connections.usesNode(host)` is false for them, so they connect without waiting
+  for the node, and `Connections` rebuilds a host's `RexHost` when its client changes.
+- `TailnetKeeper` no longer counts tailnet hosts as a need, and the Tailscale screen does not hold
+  the node, so the node stops 60 seconds later. Its keys stay, so turning the option off again
+  needs no new sign-in.
+- `hostLink` skips the node's status for these hosts, and an unreachable host says to check that
+  Tailscale is connected on the phone.
+- The address rules stay the same (`RexEndpoint.parse` with the tailnet flag), and discovery is not
+  available, because only the node knows the tailnet's peers.
 - Rex's built-in Tailscale admits only the Tailscale user who owns it, unless it was started with
   `--tailscale-allow-tailnet-members`. The user must sign Rax in with the same account.
 
@@ -39,7 +55,8 @@ Consequences:
   So whenever the node's state changes, `Connections` stops each tailnet host that is not
   connected, and starts it again from its first attempt once the node runs. A connected host is
   left alone, because its connection can outlast a short drop of the node.
-- Retry on a tailnet host, on Home, in a pane or on the Tailscale screen, calls `Tailnet.retry()`,
+- Retry on a tailnet host that uses the node, on Home, in a pane or on the Tailscale screen
+  (`AppGraph.retry`), calls `Tailnet.retry()`,
   which restarts the node if it is in `Error`. An error lasts until the backend moves on (a new
   state, a login URL or a finished login), except that a tailnet that requires network flow logs
   stays an error (`loggingRequired`) until the node runs again or signs out.

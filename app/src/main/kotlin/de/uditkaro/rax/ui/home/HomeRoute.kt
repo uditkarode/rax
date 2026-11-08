@@ -53,10 +53,7 @@ fun HomeRoute(graph: AppGraph, system: SystemActions, open: (Screen) -> Unit) {
             },
             addHost = { currentOpen(Screen.HostEditor(null)) },
             editHost = { currentOpen(Screen.HostEditor(it.id)) },
-            connect = { host ->
-                if (host.tailnet) graph.scope.launch { graph.tailnet.retry() }
-                graph.connections.retry(host.id)
-            },
+            connect = { host -> graph.retry(host) },
             newSession = newSession@{ host ->
                 val rex = graph.connections.get(host.id)?.rex ?: return@newSession
                 if (host.id in creating) return@newSession

@@ -7,6 +7,7 @@ import de.uditkaro.rax.connection.Connections
 import de.uditkaro.rax.connection.LocalNetwork
 import de.uditkaro.rax.connection.NotificationAccess
 import de.uditkaro.rax.connection.TailnetKeeper
+import de.uditkaro.rax.data.Host
 import de.uditkaro.rax.data.HostStore
 import de.uditkaro.rax.data.PermissionStore
 import de.uditkaro.rax.data.Settings
@@ -85,18 +86,26 @@ class AppGraph(val app: Application) {
         http = http,
         tailnetHttp = tailnetHttp,
         tailnetUp = tailnet.status.map { it is TailnetStatus.Running }.stateIn(scope, SharingStarted.Eagerly, false),
+        tailscaleApp = settings.map { it?.tailscaleApp }.stateIn(scope, SharingStarted.Eagerly, null),
         keepInBackground = backgroundAlerts.map { it == true }.stateIn(scope, SharingStarted.Eagerly, false),
     )
 
     /** What the phone allows and whether it has a network, which decide whether hosts can be reached. */
-    val access: StateFlow<Access> = combine(tailnet.status, localNetwork.granted, localNetwork.names, connections.online) { t, local, names, online ->
-        Access(t, local, names, online)
-    }.stateIn(scope, SharingStarted.Eagerly, Access(tailnet.status.value, localNetwork.granted.value, localNetwork.names.value, connections.online.value))
+    val access: StateFlow<Access> = combine(
+        tailnet.status, localNetwork.granted, localNetwork.names, connections.online, settings.map { it?.tailscaleApp == true },
+    ) { t, local, names, online, viaApp ->
+        Access(t, local, names, online, viaApp)
+    }.stateIn(
+        scope, SharingStarted.Eagerly,
+        Access(tailnet.status.value, localNetwork.granted.value, localNetwork.names.value, connections.online.value, settings.value?.tailscaleApp == true),
+    )
 
     /** Runs [tailnet] while a saved host uses it and [connections] is in use, or while something holds it. */
     val tailnetKeeper = TailnetKeeper(
         scope = scope,
-        hostsNeed = combine(connections.hosts, connections.inUse) { hosts, inUse -> hosts?.let { inUse && it.any { host -> host.tailnet } } },
+        hostsNeed = combine(connections.hosts, connections.inUse, settings) { hosts, inUse, s ->
+            if (hosts == null || s == null) null else inUse && !s.tailscaleApp && hosts.any { it.tailnet }
+        },
         start = { tailnet.start() },
         stop = { tailnet.stop() },
     )
@@ -168,6 +177,12 @@ class AppGraph(val app: Application) {
                 _signingOut.value = false
             }
         }
+    }
+
+    /** Reconnects [host] now, and starts the app's Tailscale node again if the host uses it and it failed. */
+    fun retry(host: Host) {
+        if (connections.usesNode(host)) scope.launch { tailnet.retry() }
+        connections.retry(host.id)
     }
 
     /** Writes a setting without tying it to the screen that asked, so leaving the screen cannot cancel it. */

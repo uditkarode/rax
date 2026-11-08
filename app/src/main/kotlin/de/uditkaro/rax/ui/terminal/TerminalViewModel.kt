@@ -508,8 +508,7 @@ class TerminalViewModel(
     /** Reconnects to the computer if needed and opens the pane's stream again. */
     fun retry() {
         val l = live ?: return
-        if (l.host.tailnet) graph.scope.launch { graph.tailnet.retry() }
-        graph.connections.retry(hostId)
+        graph.retry(l.host)
         val target = _target.value ?: return
         if (_status.value != PaneStatus.Live) show(target, restart = true)
     }

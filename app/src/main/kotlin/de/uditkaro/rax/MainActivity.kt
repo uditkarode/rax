@@ -19,10 +19,12 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -38,6 +40,9 @@ import de.uditkaro.rax.theme.ThemeCatalog
 import de.uditkaro.rax.ui.RaxNavigation
 import de.uditkaro.rax.ui.Screen
 import de.uditkaro.rax.ui.SystemActions
+import de.uditkaro.rax.ui.components.LocalSheetScrim
+import de.uditkaro.rax.ui.components.SheetScrim
+import de.uditkaro.rax.ui.components.SheetScrimLayer
 
 class MainActivity : ComponentActivity() {
     private val graph by lazy { application.graph }
@@ -107,10 +112,14 @@ class MainActivity : ComponentActivity() {
                     },
                 )
             }
+            val sheetScrim = remember { SheetScrim() }
             RaxTheme(theme) {
-                // Screens fade over this while they slide in and out.
-                Box(Modifier.fillMaxSize().background(Rax.colors.page)) {
-                    RaxNavigation(graph, system, pendingOpen = pendingOpen, onPendingOpened = { pendingOpen = null })
+                CompositionLocalProvider(LocalSheetScrim provides sheetScrim) {
+                    // Screens fade over this while they slide in and out.
+                    Box(Modifier.fillMaxSize().background(Rax.colors.page)) {
+                        RaxNavigation(graph, system, pendingOpen = pendingOpen, onPendingOpened = { pendingOpen = null })
+                        SheetScrimLayer(sheetScrim)
+                    }
                 }
             }
         }

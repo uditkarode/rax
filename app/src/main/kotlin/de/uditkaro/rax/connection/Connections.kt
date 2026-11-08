@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -40,7 +41,13 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
 /** One saved host and the live connection behind it. */
-class LiveHost(val host: Host, val endpoint: RexEndpoint, val rex: RexHost, internal val scope: CoroutineScope)
+class LiveHost(
+    val host: Host,
+    val endpoint: RexEndpoint,
+    val rex: RexHost,
+    internal val client: OkHttpClient,
+    internal val scope: CoroutineScope,
+)
 
 /**
  * Keeps one [RexHost] per saved host: connected while the app is in use, or while background
@@ -55,6 +62,8 @@ class Connections(
     private val tailnetHttp: OkHttpClient,
     /** Whether the app's Tailscale node is running, which hosts on the tailnet need before they can connect. */
     private val tailnetUp: StateFlow<Boolean>,
+    /** Whether tailnet hosts go through the Tailscale app on the phone, null until the settings are read. */
+    private val tailscaleApp: StateFlow<Boolean?>,
     private val keepInBackground: StateFlow<Boolean>,
 ) {
 
@@ -99,7 +108,10 @@ class Connections(
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     init {
-        scope.launch { hostStore.hosts.collect { sync(it) } }
+        scope.launch {
+            combine(hostStore.hosts, tailscaleApp.filterNotNull()) { hosts, viaApp -> hosts to viaApp }
+                .collect { (hosts, viaApp) -> sync(hosts, viaApp) }
+        }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 inForeground.value = true
@@ -127,7 +139,7 @@ class Connections(
         // host that is not connected waits for the node and then starts again from its first attempt.
         scope.launch {
             tailnetUp.collect { up ->
-                _live.value.values.filter { it.host.tailnet }.forEach {
+                _live.value.values.filter { usesNode(it.host) }.forEach {
                     if (it.rex.client.state.value is RexClient.State.Connected) return@forEach
                     it.rex.client.suspendConnection()
                     if (up && active) it.rex.start()
@@ -149,9 +161,12 @@ class Connections(
 
     fun get(hostId: String): LiveHost? = _live.value[hostId]
 
+    /** Whether [host] reaches the tailnet through the app's own node. */
+    fun usesNode(host: Host): Boolean = host.tailnet && tailscaleApp.value != true
+
     fun retry(hostId: String) {
         val live = _live.value[hostId] ?: return
-        if (live.host.tailnet && !tailnetUp.value) return
+        if (usesNode(live.host) && !tailnetUp.value) return
         live.rex.start()
         live.rex.retryNow()
     }
@@ -163,21 +178,21 @@ class Connections(
 
     private val active: Boolean get() = inForeground.value || keepInBackground.value
 
-    private fun canRun(host: Host): Boolean = active && (!host.tailnet || tailnetUp.value)
+    private fun canRun(host: Host): Boolean = active && (!usesNode(host) || tailnetUp.value)
 
     private fun startAll() {
         _live.value.values.forEach { if (canRun(it.host)) it.rex.start() }
     }
 
-    private fun sync(hosts: List<Host>) {
+    private fun sync(hosts: List<Host>, viaApp: Boolean) {
         val next = HashMap<String, LiveHost>()
         val old = _live.value
         for (host in hosts) {
             val endpoint = (RexEndpoint.parse(host.address, host.tailnet) as? RexEndpoint.Companion.Parsed.Ok)?.endpoint ?: continue
-            val client = if (host.tailnet) tailnetHttp else http
+            val client = if (host.tailnet && !viaApp) tailnetHttp else http
             val existing = old[host.id]
-            if (existing != null && existing.endpoint == endpoint && existing.host.tailnet == host.tailnet) {
-                next[host.id] = LiveHost(host, endpoint, existing.rex, existing.scope)
+            if (existing != null && existing.endpoint == endpoint && existing.client === client) {
+                next[host.id] = LiveHost(host, endpoint, existing.rex, client, existing.scope)
                 continue
             }
             existing?.let { it.rex.stop(); it.scope.cancel() }
@@ -190,7 +205,7 @@ class Connections(
                     if (st is RexClient.State.Down) Log.i(TAG, "${endpoint.display}: ${st.problem}")
                 }
             }
-            next[host.id] = LiveHost(host, endpoint, rex, hostScope)
+            next[host.id] = LiveHost(host, endpoint, rex, client, hostScope)
             if (canRun(host)) rex.start()
         }
         (old.keys - next.keys).forEach { id -> old[id]?.let { it.rex.stop(); it.scope.cancel() } }

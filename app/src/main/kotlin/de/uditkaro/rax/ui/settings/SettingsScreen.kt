@@ -70,7 +70,7 @@ fun SettingsScreen(graph: AppGraph, system: SystemActions, onBack: (() -> Unit)?
                     NavRow(
                         stringResource(R.string.tailscale_title),
                         { open(Screen.Tailscale) },
-                        value = when (val t = tailnet) {
+                        value = if (s.tailscaleApp) stringResource(R.string.tailscale_app) else when (val t = tailnet) {
                             is TailnetStatus.Running -> t.tailnetName
                             is TailnetStatus.NeedsLogin -> stringResource(R.string.tailscale_signed_out)
                             else -> null

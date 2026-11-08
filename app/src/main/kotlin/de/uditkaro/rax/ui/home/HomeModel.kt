@@ -43,13 +43,15 @@ enum class Need {
 /**
  * What the phone itself allows, which decides whether a host can be reached at all. [localNames]
  * says for each host name that was looked up whether it points into the local network. [online]
- * says whether the phone has a network.
+ * says whether the phone has a network. [tailscaleApp] says whether tailnet hosts go through the
+ * Tailscale app on the phone instead of the app's own node.
  */
 data class Access(
     val tailnet: TailnetStatus,
     val localNetwork: Boolean,
     val localNames: Map<String, Boolean> = emptyMap(),
     val online: Boolean = true,
+    val tailscaleApp: Boolean = false,
 )
 
 @Immutable

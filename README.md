@@ -41,6 +41,10 @@ rex server tailscale on
 In Rax, open Settings, then Tailscale, and sign in with the same Tailscale account. Rax lists the
 Rex servers it finds, and you tap one to add it.
 
+If the Tailscale app already runs on your phone, turn on "Use the Tailscale app" there instead. Rax
+then reaches your tailnet through it. Add the computer as a host with its MagicDNS name, for
+example `studio-rex.tail1234.ts.net`.
+
 ## Credits
 
 Rax draws the terminal with [libghostty-cmp](https://github.com/xchacha20-poly1305/libghostty-cmp)

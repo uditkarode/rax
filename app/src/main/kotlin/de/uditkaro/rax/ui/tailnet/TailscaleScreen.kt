@@ -31,11 +31,15 @@ import de.uditkaro.rax.ui.components.LargeTitleScreen
 import de.uditkaro.rax.ui.components.RaxIcon
 import de.uditkaro.rax.ui.components.RowBase
 import de.uditkaro.rax.ui.components.SectionHeader
+import de.uditkaro.rax.ui.components.ToggleRow
 import de.uditkaro.rax.ui.terminal.rememberTerminalFontFamily
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 
-/** Rax's own device on the user's tailnet: signing in and out, and the Rex servers it can reach there. */
+/**
+ * How Rax reaches the tailnet. With its own device on the tailnet: signing in and out, and the Rex
+ * servers it can reach there. Or through the Tailscale app on the phone.
+ */
 @Composable
 fun TailscaleScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -> Unit) {
     val status by graph.tailnet.status.collectAsStateWithLifecycle()
@@ -43,14 +47,15 @@ fun TailscaleScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -> Unit)
     val hosts by graph.connections.hosts.collectAsStateWithLifecycle()
     val settings by graph.settings.collectAsStateWithLifecycle()
     val mono = rememberTerminalFontFamily(graph, settings?.fontId ?: return)
+    val viaApp = settings?.tailscaleApp == true
     val signIn = rememberTailnetSignIn(graph)
     val context = LocalContext.current.applicationContext
     var confirmSignOut by remember { mutableStateOf(false) }
     val signingOut by graph.signingOut.collectAsStateWithLifecycle()
 
-    LifecycleStartEffect(graph) {
-        val release = graph.tailnetKeeper.hold()
-        onStopOrDispose { release() }
+    LifecycleStartEffect(graph, viaApp) {
+        val release = if (viaApp) null else graph.tailnetKeeper.hold()
+        onStopOrDispose { release?.invoke() }
     }
 
     val discovery = viewModel { RexDiscoveryModel(graph) }
@@ -60,24 +65,30 @@ fun TailscaleScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -> Unit)
     val looking = online.any { it.dnsName !in answers }
 
     LargeTitleScreen(stringResource(R.string.tailscale_title), onBack) {
-        when (val s = status) {
+        item(key = "mode") {
+            Group(Modifier.padding(top = 16.dp)) {
+                row { ToggleRow(stringResource(R.string.tailscale_use_app), viaApp, { on -> graph.updateSettings { setTailscaleApp(on) } }) }
+            }
+            if (viaApp) Footnote(stringResource(R.string.tailscale_app_about))
+        }
+        if (!viaApp) when (val s = status) {
             TailnetStatus.Stopped, TailnetStatus.Starting -> item(key = "starting") {
-                Group(Modifier.padding(top = 16.dp)) { row { InfoRow(stringResource(R.string.tailscale_starting)) } }
+                Group(Modifier.padding(top = 24.dp)) { row { InfoRow(stringResource(R.string.tailscale_starting)) } }
             }
             is TailnetStatus.NeedsLogin -> item(key = "signed-out") {
-                Group(Modifier.padding(top = 16.dp)) { row { ActionRow(stringResource(R.string.tailscale_sign_in), signIn) } }
+                Group(Modifier.padding(top = 24.dp)) { row { ActionRow(stringResource(R.string.tailscale_sign_in), signIn) } }
                 Footnote(stringResource(R.string.tailscale_about))
             }
             TailnetStatus.NeedsApproval -> {
                 item(key = "approval") {
-                    Group(Modifier.padding(top = 16.dp)) { row { InfoRow(stringResource(R.string.tailscale_waiting_approval)) } }
+                    Group(Modifier.padding(top = 24.dp)) { row { InfoRow(stringResource(R.string.tailscale_waiting_approval)) } }
                     Footnote(stringResource(R.string.tailscale_approval_footnote))
                 }
                 item(key = "sign-out") { SignOutGroup(signingOut) { confirmSignOut = true } }
             }
             is TailnetStatus.Error -> {
                 item(key = "error") {
-                    Group(Modifier.padding(top = 16.dp)) {
+                    Group(Modifier.padding(top = 24.dp)) {
                         row { InfoRow(stringResource(R.string.problem_tailnet_failed)) }
                         // Starting again does not help while the tailnet requires flow logs.
                         if (!s.loggingRequired) {
@@ -90,7 +101,7 @@ fun TailscaleScreen(graph: AppGraph, onBack: () -> Unit, open: (Screen) -> Unit)
             }
             is TailnetStatus.Running -> {
                 item(key = "account") {
-                    Group(Modifier.padding(top = 16.dp)) {
+                    Group(Modifier.padding(top = 24.dp)) {
                         row { InfoRow(stringResource(R.string.tailscale_tailnet), s.tailnetName) }
                         row { InfoRow(stringResource(R.string.tailscale_this_phone), s.dnsName.trimEnd('.').substringBefore('.')) }
                     }

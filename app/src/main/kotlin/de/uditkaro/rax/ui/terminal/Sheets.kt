@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -29,6 +28,7 @@ import de.uditkaro.rax.theme.Rax
 import de.uditkaro.rax.theme.RaxType
 import de.uditkaro.rax.ui.components.ConfirmDialog
 import de.uditkaro.rax.ui.components.Group
+import de.uditkaro.rax.ui.components.RaxSheet
 import de.uditkaro.rax.ui.components.RaxIcon
 import de.uditkaro.rax.ui.components.RenameDialog
 import de.uditkaro.rax.ui.components.RowBase
@@ -75,7 +75,7 @@ fun ActionsSheet(
     }
 
     if (pending == null) {
-        ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = c.sheet) {
+        RaxSheet(onDismissRequest = onDismiss, sheetState = sheet) {
             Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
                 SectionHeader(stringResource(R.string.action_group_pane))
                 Group(dividerInset = 52.dp) {
@@ -159,7 +159,7 @@ fun MoreKeysSheet(terminal: GhosttyTerminalState, onDismiss: () -> Unit) {
         TermKey.Tab, TermKey.ShiftTab, TermKey.CtrlC, TermKey.CtrlD, TermKey.CtrlZ, TermKey.CtrlL, TermKey.CtrlR,
         TermKey.Left, TermKey.Right, TermKey.Home, TermKey.End, TermKey.PageUp, TermKey.PageDown,
     )
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.sheet) {
+    RaxSheet(onDismissRequest = onDismiss) {
         FlowRow(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

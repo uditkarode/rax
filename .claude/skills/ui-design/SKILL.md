@@ -59,7 +59,7 @@ as the commands on the welcome screen.
 
 `ui/components` has the shared pieces: `LargeTitleScreen`, `Group` with `NavRow`, `ToggleRow`,
 `ActionRow` and `CheckRow`, `SectionHeader`, `Footnote`, `PrimaryButton`, `SegmentedControl`,
-`RaxSlider`, `ProgramGlyph`, `IconAction` and `StatusDot`. Build new screens from them, so
+`RaxSlider`, `ProgramGlyph`, `IconAction`, `StatusDot` and `RaxSheet`. Build new screens from them, so
 spacing, touch targets and colours stay the same everywhere. Icons are Material Symbols vector
 drawables in `res/drawable`. Delete an icon when its last use goes.
 
@@ -68,6 +68,10 @@ tools that Simple Icons lacks, such as Codex. `tools/program-icons.py` converts 
 its own logo set, but those files belong to Superlogical.
 `programIcon` in `HomeMapping.kt` picks a logo from the agent's ID or the process names. A program
 without a logo gets the terminal icon if it is a shell, else its first letter.
+
+A bottom sheet is a `RaxSheet`. It keeps the screen behind it dimmed while the user drags it, and
+the dim fades only when the sheet leaves. Material's own sheet drops its dim as soon as a drag
+passes the point where letting go would close it.
 
 ## Home
 

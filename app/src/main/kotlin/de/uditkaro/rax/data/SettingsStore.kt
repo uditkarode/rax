@@ -20,6 +20,8 @@ data class Settings(
     val fontId: String = DEFAULT_FONT,
     val fontSize: Float = DEFAULT_FONT_SIZE,
     val backgroundAlerts: Boolean = false,
+    /** Tailnet hosts go through the Tailscale app on the phone, and Rax runs no Tailscale node of its own. */
+    val tailscaleApp: Boolean = false,
 ) {
     companion object {
         const val DEFAULT_FONT = "paper-mono"
@@ -40,6 +42,7 @@ class SettingsStore(context: Context) {
         val font = stringPreferencesKey("font")
         val fontSize = floatPreferencesKey("font_size")
         val backgroundAlerts = booleanPreferencesKey("background_alerts")
+        val tailscaleApp = booleanPreferencesKey("tailscale_app")
     }
 
     val settings: Flow<Settings> = data.data.map { p ->
@@ -52,6 +55,7 @@ class SettingsStore(context: Context) {
             fontSize = (p[Keys.fontSize] ?: Settings.DEFAULT_FONT_SIZE)
                 .coerceIn(Settings.FONT_SIZES.start, Settings.FONT_SIZES.endInclusive),
             backgroundAlerts = p[Keys.backgroundAlerts] ?: false,
+            tailscaleApp = p[Keys.tailscaleApp] ?: false,
         )
     }
 
@@ -67,4 +71,6 @@ class SettingsStore(context: Context) {
     }
 
     suspend fun setBackgroundAlerts(on: Boolean) = data.edit { it[Keys.backgroundAlerts] = on }
+
+    suspend fun setTailscaleApp(on: Boolean) = data.edit { it[Keys.tailscaleApp] = on }
 }

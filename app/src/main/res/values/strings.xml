@@ -37,6 +37,9 @@
     <string name="service_text">Rax tells you when a program needs you.</string>
     <string name="tailscale_title">Tailscale</string>
     <string name="tailscale_signed_out">Signed out</string>
+    <string name="tailscale_use_app">Use the Tailscale app</string>
+    <string name="tailscale_app">Tailscale app</string>
+    <string name="tailscale_app_about">Hosts that go through Tailscale need the Tailscale app connected on this phone.</string>
     <string name="tailscale_starting">Starting…</string>
     <string name="tailscale_sign_in">Sign in to Tailscale</string>
     <string name="tailscale_no_browser">No app on this phone can open the sign-in page. Rax copied its link.</string>
@@ -70,6 +73,7 @@
 
     <string name="problem_unreachable">Can’t reach Rex at this address</string>
     <string name="problem_unreachable_tailnet">Can’t reach this computer on your tailnet</string>
+    <string name="problem_unreachable_tailscale_app">Can’t reach this computer. Check that Tailscale is connected on this phone.</string>
     <string name="problem_tls">The secure connection failed</string>
     <string name="problem_refused">Rex turned this phone away</string>
     <string name="problem_refused_tailnet">Rex lets in only the Tailscale account that owns it</string>

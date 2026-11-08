@@ -121,8 +121,14 @@ fun waitingText(r: Resources, record: ProgramRecord): String =
         else -> r.getString(R.string.waiting_generic)
     }
 
-fun problemText(r: Resources, problem: Problem, viaTailnet: Boolean): String = when (problem) {
-    is Problem.Unreachable -> r.getString(if (viaTailnet) R.string.problem_unreachable_tailnet else R.string.problem_unreachable)
+fun problemText(r: Resources, problem: Problem, viaTailnet: Boolean, viaTailscaleApp: Boolean = false): String = when (problem) {
+    is Problem.Unreachable -> r.getString(
+        when {
+            !viaTailnet -> R.string.problem_unreachable
+            viaTailscaleApp -> R.string.problem_unreachable_tailscale_app
+            else -> R.string.problem_unreachable_tailnet
+        },
+    )
     is Problem.Tls -> r.getString(R.string.problem_tls)
     is Problem.Refused -> r.getString(if (viaTailnet) R.string.problem_refused_tailnet else R.string.problem_refused)
     is Problem.NotRex -> r.getString(R.string.problem_not_rex)
@@ -189,7 +195,7 @@ fun tabRow(
     )
 }
 
-private fun linkOf(r: Resources, host: Host, state: HostState?, online: Boolean): Link {
+private fun linkOf(r: Resources, host: Host, state: HostState?, access: Access): Link {
     val problem = when (val l = state?.link) {
         null, RexClient.State.Stopped, is RexClient.State.Connected -> null
         // The first attempt, or one the user or the app just asked for, shows as connecting. Later
@@ -198,10 +204,10 @@ private fun linkOf(r: Resources, host: Host, state: HostState?, online: Boolean)
         is RexClient.State.Down -> l.problem.takeIf { l.retryInMs == null || shows(it, l.failingMs) }
     } ?: return Link.Connecting
     // Rax connects again by itself once the phone has a network.
-    if (!online && (problem is Problem.Unreachable || problem is Problem.Closed)) {
+    if (!access.online && (problem is Problem.Unreachable || problem is Problem.Closed)) {
         return Link.Offline(r.getString(R.string.problem_phone_offline), retryable = false)
     }
-    return Link.Offline(problemText(r, problem, host.tailnet))
+    return Link.Offline(problemText(r, problem, host.tailnet, access.tailscaleApp))
 }
 
 /**
@@ -221,6 +227,7 @@ fun hostLink(r: Resources, host: Host, state: HostState?, access: Access): Link 
         is RexEndpoint.Companion.Parsed.Invalid -> return Link.Offline(addressProblem(r, parsed.reason), retryable = false)
     }
     return when {
+        host.tailnet && access.tailscaleApp -> linkOf(r, host, state, access)
         host.tailnet -> when (val tailnet = access.tailnet) {
             is TailnetStatus.NeedsLogin -> Link.Blocked(Need.TailscaleSignIn)
             TailnetStatus.NeedsApproval -> Link.Offline(r.getString(R.string.problem_tailnet_approval), retryable = false)
@@ -228,12 +235,12 @@ fun hostLink(r: Resources, host: Host, state: HostState?, access: Access): Link 
                 if (tailnet.loggingRequired) Link.Offline(r.getString(R.string.problem_tailnet_logging), retryable = false)
                 else Link.Offline(r.getString(R.string.problem_tailnet_failed))
             TailnetStatus.Stopped, TailnetStatus.Starting -> Link.Connecting
-            is TailnetStatus.Running -> linkOf(r, host, state, access.online)
+            is TailnetStatus.Running -> linkOf(r, host, state, access)
         }
         // A name that was not looked up yet shows as connecting until the lookup tells.
         !access.localNetwork && (LocalNetwork.covers(endpoint.host) ?: access.localNames[endpoint.host] ?: false) ->
             Link.Blocked(Need.LocalNetwork)
-        else -> linkOf(r, host, state, access.online)
+        else -> linkOf(r, host, state, access)
     }
 }
 
