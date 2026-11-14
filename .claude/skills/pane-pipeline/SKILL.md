@@ -58,6 +58,12 @@ screen. It shows one pane at a time and can switch panes.
 - When the terminal's grid changes, the session calls `sendResize`. Rax sends the size, and if the pane is
   visible and not owned elsewhere, it asks to own the pane. The view also resizes each session that
   attaches to it, so a new emulator tells Rex the phone's size even when the grid stays the same.
+- The keyboard, with the key bar or the text box above it, covers the bottom of the terminal and
+  changes no size, so the program sees no resize and does not redraw when the keyboard opens or
+  closes. `TerminalScreen` keeps the dock's space under the bar and gives the terminal the covered
+  height as `contentPadding`. In `SCROLL_UNDER` mode the rows move up until the last row with
+  content is above the padding, but no further than keeps the visible cursor in sight. In a short
+  window the whole screen first moves up by the top bar's height.
 - The last grid sent to Rex is kept for the whole process. A new emulator is resized to it on
   `terminalThread` before it shows, so rewrapping a long scrollback stays off the main thread, also
   for the first pane a screen opens.

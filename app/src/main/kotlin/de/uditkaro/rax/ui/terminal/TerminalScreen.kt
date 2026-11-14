@@ -14,20 +14,22 @@ import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.rememberScrollState
@@ -41,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -51,6 +54,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -62,6 +67,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
@@ -89,6 +96,7 @@ import io.github.xchacha20_poly1305.libghostty.compose.GhosttyTerminal
 import io.github.xchacha20_poly1305.libghostty.compose.rememberGhosttyTerminalState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.min
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -152,17 +160,37 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
         if (message) hideKeyboard()
     }
 
-    Column(
+    val density = LocalDensity.current
+    // A short window, such as a phone in landscape, leaves room for the terminal with the keyboard open only
+    // without the top bar.
+    val short = with(density) { LocalWindowInfo.current.containerSize.height.toDp() } < SHORT_WINDOW
+    // The key bar or the text box, and the keyboard below it, cover the dock and the bottom of the terminal. The
+    // terminal keeps its size, so the program in the pane gets no resize and does not redraw. Its rows move up
+    // instead, as far as the last line and the cursor need.
+    val bar = textBox || imeVisible
+    var dockHeight by remember { mutableIntStateOf(0) }
+    var barHeight by remember { mutableIntStateOf(0) }
+    val belowBar = WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom)
+    val topBarHeight = with(density) { TOP_BAR_HEIGHT.roundToPx() }
+    // Called from the layout, which gets the keyboard's height in the frame it changes in, so the rows move with the
+    // keyboard.
+    val covered = { if (bar) (barHeight + belowBar.getBottom(density) - dockHeight).coerceAtLeast(0) else 0 }
+    // In a short window the top bar moves out of sight first.
+    val lift = { if (short) min(covered(), topBarHeight) else 0 }
+    val hidden = object : PaddingValues {
+        override fun calculateLeftPadding(layoutDirection: LayoutDirection) = 0.dp
+        override fun calculateTopPadding() = 0.dp
+        override fun calculateRightPadding(layoutDirection: LayoutDirection) = 0.dp
+        override fun calculateBottomPadding() = with(density) { (covered() - lift()).toDp() }
+    }
+
+    Box(
         Modifier
             .fillMaxSize()
             .background(terminalBackground)
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-            .imePadding(),
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
     ) {
-        // A short window, such as a phone in landscape, leaves room for the terminal with the keyboard open only
-        // without the top bar.
-        val short = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() } < SHORT_WINDOW
-        if (!imeVisible || !short) {
+        Column(Modifier.fillMaxSize().offset { IntOffset(0, -lift()) }) {
             TopBar(
                 title = header.title.ifEmpty { vm.live?.host?.name.orEmpty() },
                 subtitle = header.subtitle,
@@ -175,68 +203,53 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
                 onBack = onBack,
                 onActions = { actions = true },
             )
-        } else {
-            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-        }
 
-        // Keeps the terminal from drawing over the top bar.
-        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
-            if (session != null && font != null) {
-                GhosttyTerminal(
-                    session = session,
-                    state = terminalState,
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
-                    theme = remember(theme) { theme.terminal.toGhostty() },
-                    darkColorScheme = theme.dark,
-                    fontFamily = font,
-                    fontSize = s.fontSize.sp,
-                    keyboardOnAttach = false,
-                    onFontSizeChanged = { size -> graph.updateSettings { setFontSize(size.value) } },
-                )
-            }
-            if (view == PaneView.Live) {
-                GhosttyJumpToBottomButton(
-                    terminalState,
-                    contentDescription = stringResource(R.string.terminal_jump_to_bottom),
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
-                    containerColor = c.card,
-                    contentColor = c.text,
-                )
-            }
-            // The side padding keeps the pill clear of the jump to bottom button.
-            SendingPill(sending, vm::stopSending, Modifier.align(Alignment.BottomCenter).padding(horizontal = 72.dp, vertical = 12.dp))
-            PaneOverlay(
-                // The pane can be ready before its font has loaded.
-                view = if (font == null && (view == PaneView.Live || view == PaneView.Reconnecting)) PaneView.Loading(false, 0) else view,
-                hostName = vm.live?.host?.name.orEmpty(),
-                hasScreen = hasScreen,
-                onAction = { action ->
-                    when (action) {
-                        PaneAction.Retry -> vm.retry()
-                        PaneAction.SignIn -> signIn()
-                        PaneAction.AllowLocalNetwork -> system.askLocalNetwork()
+            // Keeps the terminal from drawing over the top bar.
+            Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+                if (session != null && font != null) {
+                    GhosttyTerminal(
+                        session = session,
+                        state = terminalState,
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+                        theme = remember(theme) { theme.terminal.toGhostty() },
+                        darkColorScheme = theme.dark,
+                        fontFamily = font,
+                        fontSize = s.fontSize.sp,
+                        keyboardOnAttach = false,
+                        contentPadding = hidden,
+                        onFontSizeChanged = { size -> graph.updateSettings { setFontSize(size.value) } },
+                    )
+                }
+                Box(Modifier.fillMaxSize().padding(hidden)) {
+                    if (view == PaneView.Live) {
+                        GhosttyJumpToBottomButton(
+                            terminalState,
+                            contentDescription = stringResource(R.string.terminal_jump_to_bottom),
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                            containerColor = c.card,
+                            contentColor = c.text,
+                        )
                     }
-                },
-                onUseHere = vm::useHere,
-                onBack = onBack,
-            )
-        }
+                    // The side padding keeps the pill clear of the jump to bottom button.
+                    SendingPill(sending, vm::stopSending, Modifier.align(Alignment.BottomCenter).padding(horizontal = 72.dp, vertical = 12.dp))
+                    PaneOverlay(
+                        // The pane can be ready before its font has loaded.
+                        view = if (font == null && (view == PaneView.Live || view == PaneView.Reconnecting)) PaneView.Loading(false, 0) else view,
+                        hostName = vm.live?.host?.name.orEmpty(),
+                        hasScreen = hasScreen,
+                        onAction = { action ->
+                            when (action) {
+                                PaneAction.Retry -> vm.retry()
+                                PaneAction.SignIn -> signIn()
+                                PaneAction.AllowLocalNetwork -> system.askLocalNetwork()
+                            }
+                        },
+                        onUseHere = vm::useHere,
+                        onBack = onBack,
+                    )
+                }
+            }
 
-        if (textBox) {
-            TextBox(
-                terminal = terminalState,
-                enabled = typing,
-                onFiles = vm::send,
-                onClose = { textBox = false },
-                modifier = if (imeVisible) Modifier else Modifier.windowInsetsPadding(WindowInsets.navigationBars),
-            )
-        } else if (imeVisible) {
-            KeyBar(
-                terminal = terminalState,
-                enabled = typing,
-                onHideKeyboard = hideKeyboard,
-            )
-        } else {
             val switcher: @Composable (Modifier) -> Unit = { modifier ->
                 if (panes.size > 1) {
                     PaneSwitcher(panes, target?.blockId, modifier, onPick = { id ->
@@ -252,7 +265,13 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
                     onMore = { moreKeys = true },
                 )
             }
-            val bottom = Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = 10.dp, top = 6.dp)
+            // The dock keeps its space under the bar, so the terminal keeps its size.
+            val bottom = Modifier
+                .onSizeChanged { dockHeight = it.height }
+                .placedIf(!bar)
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(bottom = 10.dp, top = 6.dp)
             // In a short window the pane switcher sits next to the dock, so the terminal keeps more rows.
             if (short) {
                 Row(bottom, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -263,6 +282,39 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
                 Column(bottom, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     switcher(Modifier)
                     dock()
+                }
+            }
+        }
+
+        if (short && bar) {
+            // Hides the top bar as it moves under the status bar, and takes the touches meant for it.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .windowInsetsTopHeight(WindowInsets.statusBars)
+                    .background(terminalBackground)
+                    .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } },
+            )
+        }
+
+        if (bar) {
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().windowInsetsPadding(belowBar)) {
+                val measured = Modifier.onSizeChanged { barHeight = it.height }
+                if (textBox) {
+                    TextBox(
+                        terminal = terminalState,
+                        enabled = typing,
+                        onFiles = vm::send,
+                        onClose = { textBox = false },
+                        modifier = measured,
+                    )
+                } else {
+                    KeyBar(
+                        terminal = terminalState,
+                        enabled = typing,
+                        onHideKeyboard = hideKeyboard,
+                        modifier = measured,
+                    )
                 }
             }
         }
@@ -309,7 +361,7 @@ private fun TopBar(
         Modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars)
-            .height(60.dp)
+            .height(TOP_BAR_HEIGHT)
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -548,6 +600,15 @@ private fun Message(text: String, hasScreen: Boolean, action: @Composable () -> 
         }
     }
 }
+
+/** Keeps the space of what it holds, and places it only when [placed]. Unplaced, it does not draw or take touches. */
+private fun Modifier.placedIf(placed: Boolean) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, placeable.height) { if (placed) placeable.place(0, 0) }
+}
+
+/** The top bar's height below the status bar. */
+private val TOP_BAR_HEIGHT = 60.dp
 
 /** Windows shorter than this hide the top bar while the keyboard is open. */
 private val SHORT_WINDOW = 480.dp

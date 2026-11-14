@@ -13,6 +13,8 @@ MIT, see `LICENSE`), Kotlin bindings for Ghostty's libghostty-vt, with these cha
   and Ctrl+C.
 - `GhosttyTerminalState.onReceiveContent` takes the files the keyboard inserts (images, GIFs,
   stickers) and the file that Paste finds on the clipboard (`GhosttyClipboard.getFile`).
+- In `GhosttyContentPaddingMode.SCROLL_UNDER`, the rows move up no further than keeps the visible
+  cursor in sight, and a new `contentPadding` applies in the frame it changes in.
 - `build-native.sh` builds the native part, in place of the upstream Gradle plugin, for arm64-v8a
   and x86_64 at API level 29.
 - The unit tests run on the JVM against a build of the JNI library for the computer that runs

@@ -118,6 +118,9 @@ internal class TerminalController(
     /** The last row with content the last time the viewport was at the bottom, or -1. */
     private var lastContentRow = -1
 
+    /** The row of the visible cursor the last time the viewport was at the bottom, or -1. */
+    private var lastCursorRow = -1
+
     /** Where the grid's top left corner is drawn in the view. */
     val gridOrigin: Offset
         get() = Offset(padding.left, overscroll)
@@ -192,6 +195,7 @@ internal class TerminalController(
         overscroll = 0f
         followsBottom = true
         lastContentRow = -1
+        lastCursorRow = -1
         session = newSession
         newSession?.attach(this)
         if (newSession != null && newSession.clipboard == null) {
@@ -222,6 +226,8 @@ internal class TerminalController(
         padding = value
         paddingMode = mode
         relayout()
+        // Settled at once, so the rows follow padding that moves with an animation.
+        settleOverscroll(render.scrollbar)
         requestFrame()
     }
 
@@ -305,6 +311,7 @@ internal class TerminalController(
             state.scrollbar = render.scrollbar
             if (changed && render.scrollbar.isAtBottom) {
                 lastContentRow = findLastContentRow()
+                lastCursorRow = if (render.cursorVisible) render.cursorRow else -1
             }
             settleOverscroll(render.scrollbar)
             if (!changed) {
@@ -904,15 +911,18 @@ internal class TerminalController(
 
     /**
      * How far [overscroll] may go: down into the top padding at the top of the scrollback, and at the bottom up until
-     * the last row with content clears the bottom padding. When both ends are shown at once, the bottom wins. In
-     * [GhosttyContentPaddingMode.INSET] the grid stays below the top padding.
+     * the last row with content clears the bottom padding, but no further than keeps the visible cursor below the top
+     * padding. When both ends are shown at once, the bottom wins. In [GhosttyContentPaddingMode.INSET] the grid stays
+     * below the top padding.
      */
     private fun overscrollRange(scrollbar: GhosttyScrollbar): ClosedFloatingPointRange<Float> {
         if (paddingMode == GhosttyContentPaddingMode.INSET) return padding.top..padding.top
         val cellHeight = glyphs?.cellHeight ?: return 0f..0f
         val top = if (scrollbar.offset == 0L) padding.top else 0f
         val bottom = if (scrollbar.isAtBottom) {
-            min(top, heightPx - padding.bottom - (lastContentRow + 1) * cellHeight)
+            val contentClear = heightPx - padding.bottom - (lastContentRow + 1) * cellHeight
+            val cursorInSight = if (lastCursorRow >= 0) padding.top - lastCursorRow * cellHeight else contentClear
+            min(top, max(contentClear, cursorInSight))
         } else {
             0f
         }

@@ -112,7 +112,10 @@ with a row to install it, which shows the download's progress and says when it f
   apply to the next key on a tap and stay on after a double tap. Arrows repeat while held. Holding
   Tab sends Shift+Tab.
 - In a short window, such as a phone in landscape, the pane switcher sits next to the dock, and the
-  top bar hides while the keyboard is open, so the terminal keeps some rows.
+  top bar moves out of sight while the keyboard is open, so the terminal keeps some rows.
+- The keyboard covers the bottom of the terminal and does not resize the pane. The rows move up
+  with the keyboard so the last line and the cursor stay in sight. A resize makes the program
+  redraw, and the screen flickers each time the keyboard opens or closes.
 - The terminal area is never blank without a reason on screen. It shows loading, the terminal,
   reconnecting over the last screen, or a message with one action. See `pane-pipeline`.
 - While a message covers the last screen, the screen takes no touches and the keys are off, and

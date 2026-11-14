@@ -25,12 +25,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -130,21 +130,6 @@ public fun GhosttyTerminal(
         }
     }
 
-    val layoutDirection = LocalLayoutDirection.current
-    LaunchedEffect(contentPadding, contentPaddingMode, density, layoutDirection) {
-        with(density) {
-            controller.setContentPadding(
-                TerminalController.PaddingPx(
-                    left = contentPadding.calculateLeftPadding(layoutDirection).toPx(),
-                    top = contentPadding.calculateTopPadding().toPx(),
-                    right = contentPadding.calculateRightPadding(layoutDirection).toPx(),
-                    bottom = contentPadding.calculateBottomPadding().toPx(),
-                ),
-                contentPaddingMode,
-            )
-        }
-    }
-
     val windowFocused = LocalWindowInfo.current.isWindowFocused
     LaunchedEffect(session, windowFocused) { controller.onWindowFocusChanged(windowFocused) }
 
@@ -168,6 +153,21 @@ public fun GhosttyTerminal(
     val decay = rememberSplineBasedDecay<Float>()
     Box(
         modifier
+            .layout { measurable, constraints ->
+                // Read in the layout, so padding that follows an animation, such as the keyboard's, applies in the
+                // frame it changes in.
+                controller.setContentPadding(
+                    TerminalController.PaddingPx(
+                        left = contentPadding.calculateLeftPadding(layoutDirection).toPx(),
+                        top = contentPadding.calculateTopPadding().toPx(),
+                        right = contentPadding.calculateRightPadding(layoutDirection).toPx(),
+                        bottom = contentPadding.calculateBottomPadding().toPx(),
+                    ),
+                    contentPaddingMode,
+                )
+                val placeable = measurable.measure(constraints)
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            }
             .onSizeChanged { controller.setSize(it.width, it.height) }
             .onGloballyPositioned { controller.layoutCoordinates = it }
             .semantics { controller.accessibilityText?.let { contentDescription = it } }
