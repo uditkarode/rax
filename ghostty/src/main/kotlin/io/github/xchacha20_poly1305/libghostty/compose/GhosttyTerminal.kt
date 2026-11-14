@@ -140,7 +140,7 @@ public fun GhosttyTerminal(
     val accessibilityEnabled by rememberAccessibilityEnabled()
     LaunchedEffect(accessibilityEnabled) { controller.onAccessibilityChanged(accessibilityEnabled) }
 
-    BackHandler(enabled = controller.selectionActive) { controller.clearSelection() }
+    BackHandler(enabled = controller.selectionActive || controller.textToolbarShown) { controller.clearSelection() }
 
     LaunchedEffect(session, focusOnAttach) {
         if (session != null && focusOnAttach) {

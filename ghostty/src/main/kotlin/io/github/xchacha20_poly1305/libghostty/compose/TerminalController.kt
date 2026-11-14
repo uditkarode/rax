@@ -164,6 +164,9 @@ internal class TerminalController(
 
     var magnifierCenter by mutableStateOf(Offset.Unspecified)
 
+    var textToolbarShown by mutableStateOf(false)
+        private set
+
     var accessibilityText: String? by mutableStateOf(null)
         private set
     private var accessibilityJob: Job? = null
@@ -187,6 +190,7 @@ internal class TerminalController(
     fun attach(newSession: GhosttyTerminalSession?) {
         if (newSession === session) return
         if (selectionActive) clearSelection()
+        hideTextToolbar()
         session?.detach(this)
         kittyImages.clear()
         composingText = null
@@ -325,7 +329,7 @@ internal class TerminalController(
                 null
             }
             val visible = selectionActive && (0 until render.rows).any { render.selection(it) != null }
-            if (selectionVisible && !visible) textToolbar.hide()
+            if (selectionVisible && !visible) hideTextToolbar()
             selectionVisible = visible
             syncBlink()
             scheduleAccessibilityText()
@@ -648,8 +652,13 @@ internal class TerminalController(
     fun clearSelection() {
         session?.withTerminal { it.clearSelection() }
         selectionActive = false
-        textToolbar.hide()
+        hideTextToolbar()
         requestFrame()
+    }
+
+    fun hideTextToolbar() {
+        textToolbarShown = false
+        textToolbar.hide()
     }
 
     /** The first and last selected cells, from the last frame. */
@@ -702,20 +711,26 @@ internal class TerminalController(
             )
         }
         val local = inGrid.translate(gridOrigin)
+        // The toolbar closes by itself after each item.
+        fun closing(action: () -> Unit): () -> Unit = {
+            textToolbarShown = false
+            action()
+        }
         textToolbar.showMenu(
             rect = Rect(coordinates.localToRoot(local.topLeft), coordinates.localToRoot(local.bottomRight)),
             onCopyRequested = if (selectionActive) {
-                ::copySelection
+                closing(::copySelection)
             } else {
                 null
             },
-            onPasteRequested = ::paste,
-            onSelectAllRequested = {
+            onPasteRequested = closing(::paste),
+            onSelectAllRequested = closing {
                 selectAll()
-                // The toolbar closes after each item; bring it back so the selection can be copied.
+                // Brought back so the selection can be copied.
                 if (selectionActive) scope.launch { showTextToolbar(at) }
             },
         )
+        textToolbarShown = true
     }
 
     // Links

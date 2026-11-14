@@ -43,6 +43,10 @@ internal fun Modifier.terminalPointerInput(
                 if (event.type != PointerEventType.Press) continue
                 val down = event.changes.firstOrNull { it.pressed && !it.previousPressed } ?: continue
                 fling?.cancel()
+                // A press anywhere closes the toolbar of a long press on an empty cell, which has no selection to
+                // clear, and a tap that closes it does nothing more.
+                val closedToolbar = !controller.selectionActive && controller.textToolbarShown
+                if (closedToolbar) controller.hideTextToolbar()
                 if (down.type == PointerType.Mouse) {
                     val previous = lastClick
                     val doubleClick = previous != null &&
@@ -51,7 +55,7 @@ internal fun Modifier.terminalPointerInput(
                     lastClick = down.uptimeMillis to down.position
                     mouseGesture(controller, focusRequester, event, down, doubleClick)
                 } else {
-                    val velocity = touchGesture(controller, focusRequester, down)
+                    val velocity = touchGesture(controller, focusRequester, down, closedToolbar)
                     if (velocity != 0f) {
                         fling = this@coroutineScope.launch {
                             fling(controller, velocity, down.position, decay)
@@ -184,6 +188,7 @@ private suspend fun AwaitPointerEventScope.touchGesture(
     controller: TerminalController,
     focusRequester: FocusRequester,
     down: PointerInputChange,
+    closedToolbar: Boolean,
 ): Float {
     if (controller.selectionVisible && dragSelectionHandle(controller, down)) return 0f
 
@@ -195,7 +200,7 @@ private suspend fun AwaitPointerEventScope.touchGesture(
     } ?: TouchStart.LongPress
     return when (start) {
         TouchStart.Tap -> {
-            tap(controller, focusRequester, down)
+            if (closedToolbar) down.consume() else tap(controller, focusRequester, down)
             0f
         }
 
@@ -228,9 +233,15 @@ private sealed interface TouchStart {
     /** A second finger came down; [event] is the one it came down in. */
     class Pinch(val event: PointerEvent) : TouchStart
 
-    /** The finger left the gesture without lifting. */
+    /** The finger left the gesture without lifting, or the system took the touch. */
     data object Lost : TouchStart
 }
+
+/**
+ * Whether the system took the touch, as it does for a back swipe that starts over the terminal. Compose reports that
+ * as a lift that is already consumed.
+ */
+private fun PointerInputChange.takenBySystem() = !pressed && previousPressed && isConsumed
 
 private suspend fun AwaitPointerEventScope.awaitTouchStart(
     down: PointerInputChange,
@@ -242,6 +253,7 @@ private suspend fun AwaitPointerEventScope.awaitTouchStart(
         if (event.changes.count { it.pressed } > 1) return TouchStart.Pinch(event)
         val change = event.changes.firstOrNull { it.id == down.id } ?: return TouchStart.Lost
         if (change.changedToUp()) return TouchStart.Tap
+        if (change.takenBySystem()) return TouchStart.Lost
         tracker.addPointerInputChange(change)
         if ((change.position - down.position).getDistance() > slop) return TouchStart.Scroll(change)
     }
@@ -293,6 +305,7 @@ private suspend fun AwaitPointerEventScope.scroll(
             return 0f
         }
         change = event.changes.firstOrNull { it.id == down.id } ?: return 0f
+        if (change.takenBySystem()) return 0f
         tracker.addPointerInputChange(change)
         if (!change.pressed) {
             change.consume()
@@ -375,7 +388,7 @@ private suspend fun AwaitPointerEventScope.longPress(controller: TerminalControl
         if (!change.pressed) break
         if (!pastSlop && (change.position - down.position).getDistance() < viewConfiguration.touchSlop) continue
         pastSlop = true
-        controller.textToolbar.hide()
+        controller.hideTextToolbar()
         controller.magnifierCenter = change.position
         val finger = controller.cellAt(change.position)
         val back = finger.row < wordStart.row || (finger.row == wordStart.row && finger.column < wordStart.column)
@@ -408,7 +421,7 @@ private suspend fun AwaitPointerEventScope.dragSelectionHandle(
         else -> return false
     }
     down.consume()
-    controller.textToolbar.hide()
+    controller.hideTextToolbar()
     // The handle hangs below the text, so the finger is a row below the cell it moves.
     val bias = 1
     while (true) {
