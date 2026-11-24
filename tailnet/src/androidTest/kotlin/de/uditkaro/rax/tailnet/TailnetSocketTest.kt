@@ -57,7 +57,7 @@ class TailnetSocketTest {
         if (peer.valid()) Os.close(peer)
     }
 
-    private fun connect(): Socket = TailnetSocket(node).apply {
+    private fun connect(): Socket = FdSocket(node::newDial).apply {
         connect(InetSocketAddress(InetAddress.getByName("100.64.0.2"), 8080), 3000)
     }
 
@@ -149,7 +149,7 @@ class TailnetSocketTest {
             canceled.await(5, TimeUnit.SECONDS)
             throw Exception("context canceled")
         }
-        val socket = TailnetSocket(node)
+        val socket = FdSocket(node::newDial)
         thread {
             dialing.await()
             socket.close()

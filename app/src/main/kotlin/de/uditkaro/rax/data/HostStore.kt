@@ -25,7 +25,19 @@ data class Host(
     val address: String,
     /** If true, Rax connects to this host through its built-in Tailscale node. */
     val tailnet: Boolean = false,
+    /** How Rax signs in when [address] is an `ssh://` address. The key and the password are in [SshStore]. */
+    val sshSignIn: SshSignIn = SshSignIn.PhoneKey,
 )
+
+@Serializable
+enum class SshSignIn {
+    /** The key Rax made on this phone, see [PhoneKey]. */
+    PhoneKey,
+
+    /** A private key the user pasted. */
+    OwnKey,
+    Password,
+}
 
 /** The saved hosts that could be read, and whether any part of the saved list could not. */
 data class StoredHosts(val hosts: List<Host>, val damaged: Boolean)

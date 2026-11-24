@@ -83,4 +83,41 @@ class RexEndpointTest {
         assertEquals(RexEndpoint.Companion.Reason.BadAddress, reason("host:abc"))
         assertEquals(RexEndpoint.Companion.Reason.BadAddress, reason("[fd00::5"))
     }
+
+    private fun ssh(input: String, tailnet: Boolean = false) =
+        (RexEndpoint.parse(input, tailnet) as RexEndpoint.Companion.Parsed.Ok).endpoint
+
+    @Test
+    fun sshAddressesTakeTheFormOfRexS() {
+        val e = ssh("ssh://me@devbox")
+        assertEquals(RexEndpoint.SshTarget("me", "devbox", 22, null), e.ssh)
+        assertEquals("me@devbox", e.display)
+        assertEquals("devbox", e.host)
+
+        assertEquals(RexEndpoint.SshTarget("me", "10.0.2.2", 2222, null), ssh("ssh://me@10.0.2.2:2222").ssh)
+        assertEquals("me@10.0.2.2:2222", ssh("SSH://me@10.0.2.2:2222/").display)
+        assertEquals(
+            RexEndpoint.SshTarget("me", "devbox", 22, "/home/me/.local/state/rex/server.sock"),
+            ssh("ssh://me@devbox/home/me/.local/state/rex/server.sock").ssh,
+        )
+        assertEquals(RexEndpoint.SshTarget("me", "fd00::5", 2200, null), ssh("ssh://me@[fd00::5]:2200").ssh)
+        assertEquals("me@[fd00::5]:2200", ssh("ssh://me@[fd00::5]:2200").display)
+        assertEquals("devbox.tail1234.ts.net", ssh("ssh://me@devbox.tail1234.ts.net", tailnet = true).host)
+        assertEquals("devbox", RexEndpoint.hostOf("ssh://me@devbox:2222"))
+    }
+
+    @Test
+    fun sshAddressesNeedAUserAndAHost() {
+        assertEquals(RexEndpoint.Companion.Reason.SshNoUser, reason("ssh://devbox"))
+        assertEquals(RexEndpoint.Companion.Reason.BadAddress, reason("ssh://"))
+        assertEquals(RexEndpoint.Companion.Reason.BadAddress, reason("ssh://me@"))
+        assertEquals(RexEndpoint.Companion.Reason.BadAddress, reason("ssh://me@devbox:0"))
+        assertEquals(RexEndpoint.Companion.Reason.BadAddress, reason("ssh://me@devbox:70000"))
+    }
+
+    @Test
+    fun sshEndpointsDifferByTarget() {
+        assertTrue(ssh("ssh://me@devbox") != ssh("ssh://you@devbox"))
+        assertEquals(ssh("ssh://me@devbox"), ssh("ssh://me@devbox:22"))
+    }
 }

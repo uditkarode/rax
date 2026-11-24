@@ -5,6 +5,7 @@ import androidx.annotation.DrawableRes
 import de.uditkaro.rax.R
 import de.uditkaro.rax.connection.LocalNetwork
 import de.uditkaro.rax.data.Host
+import de.uditkaro.rax.data.SshSignIn
 import de.uditkaro.rax.rex.BlockFacts
 import de.uditkaro.rax.rex.HostState
 import de.uditkaro.rax.rex.ProcessInfo
@@ -12,6 +13,7 @@ import de.uditkaro.rax.rex.Problem
 import de.uditkaro.rax.rex.ProgramRecord
 import de.uditkaro.rax.rex.RexClient
 import de.uditkaro.rax.rex.RexEndpoint
+import de.uditkaro.rax.rex.SshFailure
 import de.uditkaro.rax.rex.WindowView
 import de.uditkaro.rax.tailnet.TailnetStatus
 import de.uditkaro.rax.ui.components.ProgramKind
@@ -121,7 +123,13 @@ fun waitingText(r: Resources, record: ProgramRecord): String =
         else -> r.getString(R.string.waiting_generic)
     }
 
-fun problemText(r: Resources, problem: Problem, viaTailnet: Boolean, viaTailscaleApp: Boolean = false): String = when (problem) {
+fun problemText(
+    r: Resources,
+    problem: Problem,
+    viaTailnet: Boolean,
+    viaTailscaleApp: Boolean = false,
+    sshSignIn: SshSignIn,
+): String = when (problem) {
     is Problem.Unreachable -> r.getString(
         when {
             !viaTailnet -> R.string.problem_unreachable
@@ -138,6 +146,19 @@ fun problemText(r: Resources, problem: Problem, viaTailnet: Boolean, viaTailscal
         else -> problem.reason
     }
     is Problem.Closed -> r.getString(R.string.problem_closed)
+    is Problem.Ssh -> r.getString(
+        when (problem.reason) {
+            SshFailure.Reason.SignIn -> when (sshSignIn) {
+                SshSignIn.PhoneKey -> R.string.problem_ssh_phone_key
+                SshSignIn.OwnKey -> R.string.problem_ssh_own_key
+                SshSignIn.Password -> R.string.problem_ssh_password
+            }
+            SshFailure.Reason.HostKeyChanged -> R.string.link_needs_host_key
+            SshFailure.Reason.NoRex -> R.string.problem_ssh_no_rex
+            SshFailure.Reason.RexFailed -> R.string.problem_ssh_rex_failed
+            SshFailure.Reason.Other -> R.string.problem_ssh_failed
+        },
+    )
 }
 
 /**
@@ -207,7 +228,8 @@ private fun linkOf(r: Resources, host: Host, state: HostState?, access: Access):
     if (!access.online && (problem is Problem.Unreachable || problem is Problem.Closed)) {
         return Link.Offline(r.getString(R.string.problem_phone_offline), retryable = false)
     }
-    return Link.Offline(problemText(r, problem, host.tailnet, access.tailscaleApp))
+    if (problem is Problem.Ssh && problem.reason == SshFailure.Reason.HostKeyChanged) return Link.Blocked(Need.HostKey)
+    return Link.Offline(problemText(r, problem, host.tailnet, access.tailscaleApp, host.sshSignIn))
 }
 
 /**
@@ -250,6 +272,7 @@ fun addressProblem(r: Resources, reason: RexEndpoint.Companion.Reason): String =
         RexEndpoint.Companion.Reason.Empty, RexEndpoint.Companion.Reason.BadAddress -> R.string.host_invalid_address
         RexEndpoint.Companion.Reason.BadScheme -> R.string.host_invalid_scheme
         RexEndpoint.Companion.Reason.ShortTailnetName -> R.string.host_invalid_short_tailnet
+        RexEndpoint.Companion.Reason.SshNoUser -> R.string.host_invalid_ssh_user
     },
 )
 

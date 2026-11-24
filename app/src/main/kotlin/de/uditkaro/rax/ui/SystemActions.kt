@@ -8,4 +8,5 @@ package de.uditkaro.rax.ui
 class SystemActions(
     val askLocalNetwork: () -> Unit,
     val askNotifications: () -> Unit,
+    val askCamera: () -> Unit,
 )

@@ -36,6 +36,9 @@ enum class Need {
 
     /** Android 17 asks the user before an app reaches the local network. */
     LocalNetwork,
+
+    /** The computer showed another SSH host key than the one Rax saved. The host's page can trust it. */
+    HostKey,
 }
 
 /**

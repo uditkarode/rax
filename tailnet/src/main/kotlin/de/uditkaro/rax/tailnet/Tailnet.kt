@@ -49,7 +49,7 @@ class Tailnet internal constructor(
     val dns: Dns = TailnetDns(node)
 
     /** Creates sockets whose connections go through the node. */
-    val socketFactory: SocketFactory = TailnetSocketFactory(node, dns)
+    val socketFactory: SocketFactory = FdSocketFactory(node::newDial, dns)
 
     private val lifecycle = Mutex()
     @Volatile private var started = false

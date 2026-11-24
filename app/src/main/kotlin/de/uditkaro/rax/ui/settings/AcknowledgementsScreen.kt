@@ -32,6 +32,7 @@ private val software = listOf(
     Credit("Ghostty", "MIT", "licenses/ghostty.txt"),
     Credit("Tailscale", "BSD-3-Clause", "licenses/tailscale.txt"),
     Credit("OkHttp", "Apache-2.0", "licenses/apache-2.0.txt"),
+    Credit("ZXing", "Apache-2.0", "licenses/apache-2.0.txt"),
     Credit("Kotlin and kotlinx", "Apache-2.0", "licenses/apache-2.0.txt"),
     Credit("Android Jetpack", "Apache-2.0", "licenses/apache-2.0.txt"),
     Credit("Material Symbols", "Apache-2.0", "licenses/apache-2.0.txt"),

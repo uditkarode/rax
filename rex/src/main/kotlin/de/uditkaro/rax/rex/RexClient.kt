@@ -69,6 +69,27 @@ sealed interface Problem {
     /** The server and Rax share no API revision; [reason] is Rex's own sentence, such as "...; update the server". */
     data class Incompatible(val reason: String) : Problem
     data class Closed(val code: Int, val reason: String) : Problem
+
+    /** SSH to the computer failed before Rex was reached. [hostKey] is the key it showed when that key changed. */
+    data class Ssh(val reason: SshFailure.Reason, val detail: String, val hostKey: String? = null) : Problem
+}
+
+/** Thrown by the sockets of a host that Rax reaches through SSH, when SSH fails before Rex is reached. */
+class SshFailure(val reason: Reason, message: String, val hostKey: String? = null) : IOException(message) {
+    enum class Reason {
+        /** The computer did not accept the key or the password. */
+        SignIn,
+
+        /** The computer showed another host key than the one Rax saved. */
+        HostKeyChanged,
+
+        /** SSH found no rex command on the computer. */
+        NoRex,
+
+        /** Rex on the computer did not start or did not say where it listens. */
+        RexFailed,
+        Other,
+    }
 }
 
 /** What the control connection tells its owner, in order. */
@@ -312,7 +333,7 @@ class RexClient(
     /** Runs one connection until it closes, then waits before the next attempt. */
     private suspend fun connectOnce(me: Job, conn: Connection) {
         val problem: Problem = try {
-            val welcome = withTimeout(HANDSHAKE_TIMEOUT_MS) { conn.welcome.await() }
+            val welcome = withTimeout(if (endpoint.ssh != null) SSH_HANDSHAKE_TIMEOUT_MS else HANDSHAKE_TIMEOUT_MS) { conn.welcome.await() }
             whileCurrent(me) {
                 // A wake from before this connection is not a reason to skip the wait after it.
                 wake.tryReceive()
@@ -356,6 +377,8 @@ class RexClient(
     private fun retryDelay(problem: Problem, attempt: Int): Long? {
         if (problem is Problem.Incompatible) return null
         if (problem is Problem.Refused && problem.httpStatus == 403) return null
+        // Trying again cannot help until the user changes something on the computer or in Rax.
+        if (problem is Problem.Ssh && problem.reason != SshFailure.Reason.RexFailed && problem.reason != SshFailure.Reason.Other) return null
         val base = minOf(30_000L, 500L shl minOf(attempt, 6))
         return base + Random.nextLong(base / 5 + 1)
     }
@@ -483,6 +506,9 @@ class RexClient(
                 else -> Problem.NotRex("HTTP $status")
             }
         }
+        generateSequence(t) { it.cause }.firstNotNullOfOrNull { it as? SshFailure }?.let {
+            return Problem.Ssh(it.reason, it.message.orEmpty(), it.hostKey)
+        }
         return when (t) {
             is SSLException -> Problem.Tls(t.message ?: "TLS failed")
             is UnknownHostException -> Problem.Unreachable("unknown host")
@@ -499,6 +525,9 @@ class RexClient(
         const val API_MIN_REVISION = 11
         const val CONTROL_SUBPROTOCOL = "rex.control.v1"
         private const val HANDSHAKE_TIMEOUT_MS = 12_000L
+
+        /** Signing in to SSH and starting Rex on the computer come before the handshake. */
+        private const val SSH_HANDSHAKE_TIMEOUT_MS = 30_000L
     }
 }
 

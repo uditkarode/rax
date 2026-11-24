@@ -10,32 +10,59 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * - `host:port` uses HTTPS on 443 and plain HTTP on any other port;
  * - a bare name uses HTTPS on 443 when it is reached through Tailscale or is a MagicDNS name, the
  *   way Rex's built-in Tailscale serves, and plain HTTP on 7297 otherwise, the port Rex suggests
- *   for `--extra-listen`. A bare IP through Tailscale also uses plain HTTP on 7297.
+ *   for `--extra-listen`. A bare IP through Tailscale also uses plain HTTP on 7297;
+ * - `ssh://user@host[:port][/socket]`, the form `rex -S` takes, reaches Rex through SSH ([ssh]).
  *
- * A path after the host, such as `/api/control`, is dropped.
+ * A path after the host, such as `/api/control`, is dropped, except for SSH, where it is the path
+ * of Rex's socket on the computer.
  */
-class RexEndpoint private constructor(val base: HttpUrl) {
+class RexEndpoint private constructor(val base: HttpUrl, val ssh: SshTarget? = null) {
 
     val controlUrl: String get() = wsUrl("api/control")
     val dataUrl: String get() = wsUrl("api/data")
     val secure: Boolean get() = base.isHttps
-    val host: String get() = base.host
 
-    /** The address as a person reads it, such as `devbox.tail1234.ts.net` or `ws://192.168.1.20:7297`. */
+    /** The computer's name or IP. */
+    val host: String get() = ssh?.host ?: base.host
+
+    /** The address as a person reads it, such as `devbox.tail1234.ts.net`, `ws://192.168.1.20:7297` or `me@devbox`. */
     val display: String
-        get() = if (secure && base.port == 443) base.host else "${if (secure) "wss" else "ws"}://${base.host}:${base.port}"
+        get() = when {
+            ssh != null -> ssh.display
+            secure && base.port == 443 -> base.host
+            else -> "${if (secure) "wss" else "ws"}://${base.host}:${base.port}"
+        }
 
     private fun wsUrl(path: String): String {
         val url = base.newBuilder().addPathSegments(path).build().toString()
         return if (url.startsWith("https://")) "wss://" + url.removePrefix("https://") else "ws://" + url.removePrefix("http://")
     }
 
-    override fun equals(other: Any?) = other is RexEndpoint && other.base == base
-    override fun hashCode() = base.hashCode()
-    override fun toString() = base.toString()
+    override fun equals(other: Any?) = other is RexEndpoint && other.base == base && other.ssh == ssh
+    override fun hashCode() = base.hashCode() * 31 + ssh.hashCode()
+    override fun toString() = ssh?.let { "ssh://${it.display}" } ?: base.toString()
+
+    /**
+     * A computer that Rax reaches through SSH as [user], on [port]. [socket] is the path of Rex's
+     * socket there, or null to ask Rex on the computer, as `rex -S ssh://...` does.
+     */
+    data class SshTarget(val user: String, val host: String, val port: Int, val socket: String?) {
+        /** The host, and the port when it is not 22, such as `devbox` or `[fd7a::1]:2222`. */
+        val address: String
+            get() {
+                val h = if (':' in host) "[$host]" else host
+                return if (port == SSH_PORT) h else "$h:$port"
+            }
+
+        val display: String get() = "$user@$address"
+    }
 
     companion object {
         const val DEFAULT_PORT = 7297
+        const val SSH_PORT = 22
+
+        /** Where the HTTP requests of an SSH host go. Each connection is a stream to Rex's socket, so the name is never looked up. */
+        private val SSH_BASE: HttpUrl = "http://rex.invalid/".toHttpUrlOrNull()!!
 
         sealed interface Parsed {
             data class Ok(val endpoint: RexEndpoint) : Parsed
@@ -52,6 +79,9 @@ class RexEndpoint private constructor(val base: HttpUrl) {
              * certificate only for the full `.ts.net` name, so the connection could not be secure.
              */
             ShortTailnetName,
+
+            /** An `ssh://` address without the user to sign in as. */
+            SshNoUser,
         }
 
         fun parse(input: String, tailnet: Boolean): Parsed {
@@ -76,6 +106,7 @@ class RexEndpoint private constructor(val base: HttpUrl) {
                 "http", "https" -> text
                 "ws" -> "http://" + text.substringAfter("://")
                 "wss" -> "https://" + text.substringAfter("://")
+                "ssh" -> return parseSsh(input.trim().substringAfter("://"))
                 else -> return Parsed.Invalid(Reason.BadScheme)
             }
             val parsed = url.toHttpUrlOrNull() ?: return Parsed.Invalid(Reason.BadAddress)
@@ -84,8 +115,27 @@ class RexEndpoint private constructor(val base: HttpUrl) {
             return Parsed.Ok(RexEndpoint(parsed.newBuilder().encodedPath("/").query(null).fragment(null).build()))
         }
 
+        /** `user@host[:port][/socket]`, after `ssh://`. */
+        private fun parseSsh(rest: String): Parsed {
+            val at = rest.substringBefore('/').lastIndexOf('@')
+            if (at <= 0) return Parsed.Invalid(if (rest.substringBefore('/').isBlank()) Reason.BadAddress else Reason.SshNoUser)
+            val user = rest.substring(0, at)
+            val afterUser = rest.substring(at + 1)
+            val (host, port) = authority(afterUser) ?: return Parsed.Invalid(Reason.BadAddress)
+            if (port != null && port !in 1..65535) return Parsed.Invalid(Reason.BadAddress)
+            if (host.any { it.isWhitespace() } || user.any { it.isWhitespace() || it == ':' }) return Parsed.Invalid(Reason.BadAddress)
+            val socket = afterUser.indexOf('/').takeIf { it >= 0 }?.let { afterUser.substring(it) }?.takeIf { it.length > 1 }
+            return Parsed.Ok(RexEndpoint(SSH_BASE, SshTarget(user, host, port ?: SSH_PORT, socket)))
+        }
+
         /** The host in what the user typed, as typed and without brackets, or null if there is none. */
-        fun hostOf(input: String): String? = authority(input.trim().substringAfter("://"))?.first
+        fun hostOf(input: String): String? {
+            val rest = input.trim().substringAfter("://")
+            return authority(if (isSsh(input)) rest.substringAfter('@') else rest)?.first
+        }
+
+        /** Whether [input] is an `ssh://` address. */
+        fun isSsh(input: String): Boolean = input.trim().startsWith("ssh://", ignoreCase = true)
 
         /**
          * Host and port of `host[:port][/path]`, where an IPv6 host is either in brackets or bare. A

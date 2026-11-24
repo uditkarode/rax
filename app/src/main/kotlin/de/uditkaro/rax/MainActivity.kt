@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
                 else -> startActivity(notificationSettings())
             }
         },
+        askCamera = { ask(Manifest.permission.CAMERA) },
     )
 
     /** A pane a notification asked to open. */

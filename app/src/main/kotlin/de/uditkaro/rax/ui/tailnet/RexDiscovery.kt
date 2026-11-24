@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import de.uditkaro.rax.AppGraph
 import de.uditkaro.rax.tailnet.TailnetPeer
 import de.uditkaro.rax.tailnet.TailnetStatus
+import de.uditkaro.rax.ui.hosts.rexDeviceName
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -87,7 +88,7 @@ fun rexProbeClient(tailnetHttp: OkHttpClient): OkHttpClient =
  */
 suspend fun findRexServer(probe: OkHttpClient, peer: TailnetPeer): RexServer? = coroutineScope {
     val host = peer.dnsName.trimEnd('.')
-    val name = displayName(peer.hostName)
+    val name = rexDeviceName(peer.hostName)
     val https = async { ask(probe, "https://$host/api/control") }
     val lan = async { ask(probe, "http://$host:$REX_PORT/api/control") }
     val secure = https.await()
@@ -132,10 +133,6 @@ private fun answerOf(response: Response): Answer = when (response.code) {
 
 private fun isErrorJson(body: String): Boolean =
     runCatching { Json.parseToJsonElement(body).jsonObject["error"] is JsonPrimitive }.getOrDefault(false)
-
-/** Rex names its own tailnet device after the computer, as `rex` or `studio-rex`. */
-private fun displayName(hostName: String): String =
-    hostName.removeSuffix("-rex").removePrefix("rex-").ifEmpty { hostName }
 
 private const val REX_PORT = 7297
 private const val PROBE_TIMEOUT_S = 5L

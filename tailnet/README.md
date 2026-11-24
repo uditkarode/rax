@@ -1,8 +1,9 @@
 # :tailnet
 
-Rax's own Tailscale node. It runs Tailscale's `tsnet` in userspace inside the app
-process, so Rax reaches computers on the user's tailnet without the Tailscale app
-and without a `VpnService`.
+Rax's own Tailscale node, and its SSH client. The node runs Tailscale's `tsnet` in
+userspace inside the app process, so Rax reaches computers on the user's tailnet
+without the Tailscale app and without a `VpnService`. Both are in the one Go
+library of the app, because an app can load only one gomobile library.
 
 ## Design
 
@@ -21,16 +22,31 @@ and without a `VpnService`.
     and addresses of each device. Mullvad exit nodes are left out.
   - `dns`, `socketFactory`, and `clientBuilder(base)`, which returns
     `base.newBuilder()` with both set and with no proxy.
+  - SSH (`Ssh.kt`): `SshAttempt.connect` signs in and finds Rex on the computer,
+    and `SshAttempt.open` opens a stream to Rex on an `SshConnection`.
+    `sshClientBuilder(base, open)` returns `base.newBuilder()` with each connection
+    made as such a stream. A failure that SSH explains is an `SshFailure` from
+    `:rex`, with a reason. `SshKeys` makes the authorized_keys line
+    of the phone's key, checks a pasted private key, and computes fingerprints.
 - Connections: OkHttp asks `dns` for the address and then connects a socket from
   `socketFactory`. The socket asks Go to dial the address with `tsnet`. Go makes a
   Unix socketpair, copies data between one end and the tailnet connection, and
   returns the other end's file descriptor. Kotlin adopts the descriptor and
-  exposes it as a `java.net.Socket` with a custom `SocketImpl`. `SO_TIMEOUT` uses
+  exposes it as a `java.net.Socket` with a custom `SocketImpl` (`FdSocket`). `SO_TIMEOUT` uses
   `poll`, and `close()` also aborts a dial in progress. Half-closes pass through.
   OkHttp and Conscrypt layer TLS on this socket with the URL's host name, so
   certificate checks are normal. The node opens no listening ports.
 - `dns` resolves names like a `tsnet` dial does: MagicDNS names (also short names)
   and the tailnet's DNS records first, then the system resolver.
+- SSH (`go/ssh.go`, with `golang.org/x/crypto/ssh`) works the way `rex -S ssh://...`
+  does (`docs/rex-protocol.md` 2.2): it runs `rex server start --json` on the
+  computer to find Rex's socket, then forwards that socket per stream, or runs
+  `rex __internal dial-stdio` per stream where the server refuses to forward.
+  Each stream reaches Kotlin as an `FdSocket`, like a tailnet connection. The TCP
+  connection goes through the node for a host on the tailnet, and to addresses
+  that Kotlin looked up otherwise. The phone's key stays in Android's keystore,
+  so Go asks Kotlin to sign (`SSHSigner`). A connection sends a keepalive every
+  15 s, ends after 3 go unanswered, and closes 10 s after its last stream.
 - Login: the node requests a login URL by itself when it needs one (first start,
   after `logout()`, or after key expiry). `status` shows the URL as `NeedsLogin`.
   Keys are in `noBackupFilesDir/tailnet`, so the user logs in once and a backup
@@ -99,8 +115,16 @@ To update Tailscale: `cd go && go get tailscale.com@<version> && go mod tidy`.
 - Device or emulator: `./gradlew :tailnet:connectedDebugAndroidTest`. It tests the
   socket over local socketpairs (timeouts, close, half-close, TLS on top, OkHttp)
   and starts the real node up to a login URL. It does not log in.
-- Go on the host: `cd go && go test ./...`. The socketpair tests need Linux. To run
-  them on a device:
+- Go on the host: `cd go && go test ./...`. The SSH tests that need a server run
+  against throwaway OpenSSH servers and the isolated Rex server:
+
+  ```
+  tools/rex-probe/isolated-server.sh start   # in one terminal
+  tools/rex-probe/test-sshd.sh start         # in another
+  cd tailnet/go && env $(../../tools/rex-probe/test-sshd.sh env | xargs) go test ./...
+  ```
+
+  The socketpair tests need Linux. To run them on a device:
 
   ```
   cd go

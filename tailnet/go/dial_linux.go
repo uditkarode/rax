@@ -3,13 +3,11 @@ package libtailnet
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/netip"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -49,51 +47,29 @@ func Lookup(name string) (string, error) {
 	return strings.Join(ips, " "), nil
 }
 
-// DialHandle is one outgoing connection attempt. Cancel can be called from
-// another thread to abort Dial.
-type DialHandle struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func NewDialHandle() *DialHandle {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &DialHandle{ctx: ctx, cancel: cancel}
-}
-
-// Cancel aborts a Dial in progress, or makes a later Dial fail at once.
-func (h *DialHandle) Cancel() { h.cancel() }
-
 // Dial connects to host:port through the node and returns a file descriptor
 // of a Unix stream socket that carries the connection. The caller owns the
 // descriptor; closing it closes the connection. timeoutMillis <= 0 means no
-// timeout. An error whose message starts with "timeout:" is a timeout.
+// timeout.
 func (h *DialHandle) Dial(host string, port int32, timeoutMillis int32) (int32, error) {
-	n, err := runningNode()
+	ctx, cancel := h.withTimeout(timeoutMillis)
+	defer cancel()
+	remote, err := dialNode(ctx, host, port)
 	if err != nil {
 		return -1, err
 	}
-	ctx := h.ctx
-	if timeoutMillis > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutMillis)*time.Millisecond)
-		defer cancel()
-	}
-	addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
-	remote, err := n.srv.Dial(ctx, "tcp", addr)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || isTimeout(err) {
-			return -1, fmt.Errorf("timeout: connecting to %s: %w", addr, err)
-		}
-		return -1, fmt.Errorf("connecting to %s: %w", addr, err)
-	}
+	return handOff(remote)
+}
 
+// handOff returns a file descriptor of a Unix stream socket that carries
+// remote, which it owns from then on. The caller owns the descriptor.
+func handOff(remote net.Conn) (int32, error) {
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
 		remote.Close()
 		return -1, fmt.Errorf("socketpair: %w", err)
 	}
-	f := os.NewFile(uintptr(fds[0]), "tailnet-conn")
+	f := os.NewFile(uintptr(fds[0]), "app-conn")
 	c, err := net.FileConn(f) // dups the fd
 	f.Close()
 	if err != nil {
@@ -105,12 +81,7 @@ func (h *DialHandle) Dial(host string, port int32, timeoutMillis int32) (int32, 
 	return int32(fds[1]), nil
 }
 
-func isTimeout(err error) bool {
-	var ne net.Error
-	return errors.As(err, &ne) && ne.Timeout()
-}
-
-// splice copies between the tailnet connection and the Go end of the
+// splice copies between remote and the Go end of the
 // socketpair until both directions are done. Half-closes pass through.
 func splice(remote net.Conn, local *net.UnixConn) {
 	var closeOnce sync.Once

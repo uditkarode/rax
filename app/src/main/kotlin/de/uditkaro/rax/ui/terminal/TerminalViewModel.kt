@@ -268,6 +268,7 @@ class TerminalViewModel(
                 is Link.Blocked -> when (link.need) {
                     Need.TailscaleSignIn -> PaneView.Failed(r.getString(R.string.link_needs_tailnet), PaneAction.SignIn)
                     Need.LocalNetwork -> PaneView.Failed(r.getString(R.string.link_needs_local_network), PaneAction.AllowLocalNetwork)
+                    Need.HostKey -> PaneView.Failed(r.getString(R.string.link_needs_host_key), null)
                 }
                 null, Link.Connecting -> if (hasScreen) PaneView.Reconnecting else PaneView.Loading(connecting = true, bytes = 0)
                 is Link.Online -> when {

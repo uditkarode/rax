@@ -69,7 +69,7 @@ class HomeActions(
     val editHost: (Host) -> Unit,
     val connect: (Host) -> Unit,
     val newSession: (Host) -> Unit,
-    val allow: (Need) -> Unit,
+    val allow: (Host, Need) -> Unit,
     val settings: () -> Unit,
     val tailscale: () -> Unit,
     val refresh: () -> Unit,
@@ -237,15 +237,17 @@ private fun HostHeader(card: HostCard, actions: HomeActions, creating: Boolean) 
                     when (link.need) {
                         Need.TailscaleSignIn -> R.string.link_needs_tailnet
                         Need.LocalNetwork -> R.string.link_needs_local_network
+                        Need.HostKey -> R.string.link_needs_host_key
                     },
                 ),
                 stringResource(
                     when (link.need) {
                         Need.TailscaleSignIn -> R.string.link_sign_in
                         Need.LocalNetwork -> R.string.link_allow
+                        Need.HostKey -> R.string.link_review
                     },
                 ),
-            ) { actions.allow(link.need) }
+            ) { actions.allow(card.host, link.need) }
             Link.Connecting, is Link.Online -> Unit
         }
     }

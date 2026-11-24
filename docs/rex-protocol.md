@@ -120,14 +120,48 @@ Observed `server.whoami` over the user's built-in Tailscale address (read-only):
 - Status is in `server.status.tailscale`: `state` (`disabled`, `starting`, `needs_login`, `needs_machine_approval`, `running`),
   `dns_name`, `https.state` (`pending`, `available`), `https.url`, `allow_tailnet_members`, `tags`, `account.login_name`.
   Changes arrive as `tailscale_status_changed` to connections that called `session.attach_all` or `session.bootstrap`.
-- `rex server tailscale pair --json` prints `{"url": "https://laptop-rex.tail1234.ts.net"}`. The QR code holds only the address,
-  not a credential **(server doc)**. The exact QR payload is **(unconfirmed)**, presumably that URL.
+- `rex server tailscale pair --json` prints `{"url": "https://laptop-rex.tail1234.ts.net"}`. The QR code that
+  `rex server tailscale pair` draws holds exactly that URL and nothing else (rex 0.1.0-preview.21, decoded from its
+  output). It is drawn with half-block characters, so in a terminal with a dark background its modules are light on
+  dark. The command tells the user to tap "Pair via QR Code" in Rex on the other device, which must be on the same tailnet.
 
 What the phone needs for Tailscale: the Tailscale app (or an embedded Tailscale) on the same tailnet,
 signed in as the device owner, or any member when the server allows tailnet members. Then connect
 to `wss://NAME.TAILNET.ts.net/api/control`.
 
-### 2.2 Local-only methods
+### 2.2 SSH
+
+Since rex 0.1.0-preview.21, `-S` and `rex hosts add` take `ssh://[USER@]HOST[:PORT][/SOCKET]`. The server
+side has nothing for SSH: the client signs in with SSH and talks to the server's Unix socket through it,
+where it is admitted as `peer` with the SSH account's `uid`. Observed from the CLI with `-vv` against a
+throwaway sshd (`tools/rex-probe/test-sshd.sh`):
+
+1. Without a socket path, it runs on the computer, through the system `ssh` with `BatchMode=yes`,
+   `ServerAliveInterval=15`, `ServerAliveCountMax=3` and a shared connection (`ControlPersist=10`):
+
+   ```sh
+   sh -c 'case "${REX_AUTOSTART-}" in ""|1|t|T|true|TRUE|True) rex server start --json;; *) rex server status --json;; esac'
+   ```
+
+   If `rex` is not on the PATH of that non-interactive shell, it runs the same with `~/.local/bin/rex`,
+   where `rex server install ssh://...` puts it. Without either it says that Rex is not installed there or
+   not on that PATH. `start` starts a server that is not running, and both print the status JSON, whose
+   `endpoint` is the socket, such as `unix:///home/me/.local/state/rex/server.sock` (URL-escaped).
+2. It forwards that socket with `ssh -N -L LOCAL.sock:REMOTE.sock` (OpenSSH's
+   `direct-streamlocal@openssh.com` channel) and speaks the normal protocol over it. `Host` is not checked
+   on the socket.
+3. When the server refuses to forward (`AllowStreamLocalForwarding no`), it runs
+   `rex __internal dial-stdio` over SSH for each connection, which joins the command's input and output to
+   the server's socket. OpenSSH refuses a forbidden forward and one to a missing socket alike, with
+   "connect failed (open failed)".
+
+Rax has no `ssh` command to run, so `:tailnet`'s Go library is its SSH client (`golang.org/x/crypto/ssh`).
+It does the same steps, with one connection per host and a channel per WebSocket. It also tries
+`~/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex`,
+because on a Mac `rex` is on the PATH only in the shells Rex opens. It accepts a computer's host key the first time
+and refuses a different one until the user trusts it.
+
+### 2.3 Local-only methods
 
 `server.stop` works only over the Unix socket; over TCP or Tailscale it fails with status 403 **(server doc)**.
 `server.config_reload` is refused over a remote connection **(web doc)**.

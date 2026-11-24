@@ -6,6 +6,7 @@ import android.content.res.Resources
 import android.util.DisplayMetrics
 import de.uditkaro.rax.R
 import de.uditkaro.rax.data.Host
+import de.uditkaro.rax.data.SshSignIn
 import de.uditkaro.rax.rex.BlockFacts
 import de.uditkaro.rax.rex.BlockView
 import de.uditkaro.rax.rex.HostState
@@ -16,6 +17,7 @@ import de.uditkaro.rax.rex.RexClient
 import de.uditkaro.rax.rex.SessionInfo
 import de.uditkaro.rax.rex.SessionState
 import de.uditkaro.rax.rex.SessionView
+import de.uditkaro.rax.rex.SshFailure
 import de.uditkaro.rax.rex.Welcome
 import de.uditkaro.rax.rex.WindowView
 import de.uditkaro.rax.tailnet.TailnetStatus
@@ -149,6 +151,30 @@ class HomeMappingTest {
         val tls = Problem.Tls("bad certificate")
         assertEquals(Link.Offline("#${R.string.problem_tls}"), linkWith(RexClient.State.Down(tls, 500, attempt = 0, failingMs = 100)))
         assertEquals(Link.Offline("#${R.string.problem_tls}"), linkWith(RexClient.State.Connecting(attempt = 1, lastProblem = tls, failingMs = 100)))
+    }
+
+    @Test
+    fun sshProblemsNameTheWayRaxSignedIn() {
+        fun link(signIn: SshSignIn, problem: Problem) = hostLink(
+            r,
+            Host(name = "h", address = "ssh://me@203.0.113.5", sshSignIn = signIn),
+            HostState(link = RexClient.State.Down(problem, null, attempt = 0, failingMs = 0)),
+            access,
+        )
+        val refused = Problem.Ssh(SshFailure.Reason.SignIn, "unable to authenticate")
+        assertEquals(Link.Offline("#${R.string.problem_ssh_phone_key}"), link(SshSignIn.PhoneKey, refused))
+        assertEquals(Link.Offline("#${R.string.problem_ssh_own_key}"), link(SshSignIn.OwnKey, refused))
+        assertEquals(Link.Offline("#${R.string.problem_ssh_password}"), link(SshSignIn.Password, refused))
+        assertEquals(Link.Offline("#${R.string.problem_ssh_no_rex}"), link(SshSignIn.PhoneKey, Problem.Ssh(SshFailure.Reason.NoRex, "")))
+        val changed = Problem.Ssh(SshFailure.Reason.HostKeyChanged, "", hostKey = "ssh-ed25519 AAAA")
+        assertEquals(Link.Blocked(Need.HostKey), link(SshSignIn.PhoneKey, changed))
+    }
+
+    @Test
+    fun anSshHostOnTheLocalNetworkNeedsLocalNetworkAccess() {
+        val denied = Access(TailnetStatus.Stopped, localNetwork = false)
+        assertEquals(Link.Blocked(Need.LocalNetwork), hostLink(r, Host(name = "h", address = "ssh://me@192.168.1.20"), null, denied))
+        assertEquals(Link.Connecting, hostLink(r, Host(name = "h", address = "ssh://me@203.0.113.5:2222"), null, denied))
     }
 
     @Test

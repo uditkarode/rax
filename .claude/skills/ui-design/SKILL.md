@@ -92,6 +92,14 @@ Pulling Home down refreshes it, with Android's circle below the top bar (`LargeT
 When a newer preview is out, a small accent dot sits on the settings button, and Settings starts
 with a row to install it, which shows the download's progress and says when it failed.
 
+## Adding a host
+
+The editor starts with Scan QR code, for the code `rex server tailscale pair` shows. An `ssh://`
+address adds a choice of how to sign in: Rax's key (shown with a copy button and where to put it),
+a pasted private key, or a password. A passphrase field appears only for a key that needs one. Saved
+secrets are never shown again, and an empty field keeps them. When a computer's SSH host key
+changes, Home says so with Review, which opens the editor at the new key's fingerprint and Trust.
+
 ## Feedback
 
 - A tap shows its result at once. An action that waits for Rex or for Tailscale shows that it

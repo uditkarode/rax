@@ -3,21 +3,26 @@ package de.uditkaro.rax.connection
 import android.app.Application
 import android.net.ConnectivityManager
 import android.net.Network
-import android.os.Build
-import android.provider.Settings
 import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import de.uditkaro.rax.BuildConfig
+import de.uditkaro.rax.deviceName
 import de.uditkaro.rax.data.Host
 import de.uditkaro.rax.data.HostStore
+import de.uditkaro.rax.data.PhoneKey
+import de.uditkaro.rax.data.SshSignIn
+import de.uditkaro.rax.data.SshStore
 import de.uditkaro.rax.rex.Alert
 import de.uditkaro.rax.rex.ClientIdentity
 import de.uditkaro.rax.rex.HostState
 import de.uditkaro.rax.rex.RexClient
 import de.uditkaro.rax.rex.RexEndpoint
 import de.uditkaro.rax.rex.RexHost
+import de.uditkaro.rax.rex.SshFailure
+import de.uditkaro.rax.tailnet.SshAuth
+import de.uditkaro.rax.tailnet.SshLogin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,6 +44,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 
 /** One saved host and the live connection behind it. */
@@ -48,6 +55,8 @@ class LiveHost(
     val rex: RexHost,
     internal val client: OkHttpClient,
     internal val scope: CoroutineScope,
+    /** The SSH connection behind [client], for a host with an `ssh://` address. */
+    internal val ssh: SshLink? = null,
 )
 
 /**
@@ -61,6 +70,10 @@ class Connections(
     private val http: OkHttpClient,
     /** Reaches the tailnet through the app's own node. */
     private val tailnetHttp: OkHttpClient,
+    /** Looks up the names of hosts that Rax reaches through SSH outside the tailnet. */
+    private val dns: Dns,
+    private val sshStore: SshStore,
+    private val phoneKey: PhoneKey,
     /** Whether the app's Tailscale node is running, which hosts on the tailnet need before they can connect. */
     private val tailnetUp: StateFlow<Boolean>,
     /** Whether tailnet hosts go through the Tailscale app on the phone, null until the settings are read. */
@@ -68,11 +81,7 @@ class Connections(
     private val keepInBackground: StateFlow<Boolean>,
 ) {
 
-    private val identity = ClientIdentity(
-        name = "Rax",
-        version = BuildConfig.VERSION_NAME,
-        label = Settings.Global.getString(app.contentResolver, Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() } ?: Build.MODEL,
-    )
+    private val identity = ClientIdentity(name = "Rax", version = BuildConfig.VERSION_NAME, label = deviceName(app))
 
     private val _live = MutableStateFlow<Map<String, LiveHost>>(emptyMap())
     val live: StateFlow<Map<String, LiveHost>> = _live.asStateFlow()
@@ -195,13 +204,19 @@ class Connections(
         val old = _live.value
         for (host in hosts) {
             val endpoint = (RexEndpoint.parse(host.address, host.tailnet) as? RexEndpoint.Companion.Parsed.Ok)?.endpoint ?: continue
-            val client = if (host.tailnet && !viaApp) tailnetHttp else http
+            val viaNode = host.tailnet && !viaApp
+            val plain = if (viaNode) tailnetHttp else http
             val existing = old[host.id]
-            if (existing != null && existing.endpoint == endpoint && existing.client === client) {
-                next[host.id] = LiveHost(host, endpoint, existing.rex, client, existing.scope)
+            // An SSH host's link reads the sign-in method when it is made.
+            if (existing != null && existing.endpoint == endpoint &&
+                (existing.ssh?.let { it.viaTailnet == viaNode && existing.host.sshSignIn == host.sshSignIn } ?: (existing.client === plain))
+            ) {
+                next[host.id] = LiveHost(host, endpoint, existing.rex, existing.client, existing.scope, existing.ssh)
                 continue
             }
-            existing?.let { it.rex.stop(); it.scope.cancel() }
+            existing?.let(::end)
+            val ssh = endpoint.ssh?.let { sshLink(host, it, viaNode) }
+            val client = ssh?.client(http) ?: plain
             val hostScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             val rex = RexHost(endpoint, client, identity, hostScope)
             // The host can be renamed later and keep this connection.
@@ -211,16 +226,45 @@ class Connections(
                     if (st is RexClient.State.Down) Log.i(TAG, "${endpoint.display}: ${st.problem}")
                 }
             }
-            next[host.id] = LiveHost(host, endpoint, rex, client, hostScope)
+            next[host.id] = LiveHost(host, endpoint, rex, client, hostScope, ssh)
             if (canRun(host)) rex.start()
         }
-        (old.keys - next.keys).forEach { id -> old[id]?.let { it.rex.stop(); it.scope.cancel() } }
+        (old.keys - next.keys).forEach { id -> old[id]?.let(::end) }
         _live.value = next
         _hosts.value = hosts
     }
 
+    private fun end(live: LiveHost) {
+        live.rex.stop()
+        live.scope.cancel()
+        // The close frame that ends the client on Rex goes through the SSH connection.
+        live.ssh?.let { scope.launch { delay(SSH_CLOSE_DELAY_MS); it.close() } }
+    }
+
+    private fun sshLink(host: Host, target: RexEndpoint.SshTarget, viaNode: Boolean) = SshLink(
+        target = target,
+        viaTailnet = viaNode,
+        resolve = dns::lookup,
+        login = {
+            runBlocking {
+                val auth = when (host.sshSignIn) {
+                    SshSignIn.PhoneKey -> SshAuth.PhoneKey(phoneKey.publicKey(), phoneKey::sign)
+                    SshSignIn.OwnKey -> sshStore.secrets(host.id).let { s ->
+                        SshAuth.PrivateKey(s.privateKey ?: throw SshFailure(SshFailure.Reason.SignIn, "no saved key"), s.passphrase.orEmpty())
+                    }
+                    SshSignIn.Password -> SshAuth.Password(
+                        sshStore.secrets(host.id).password ?: throw SshFailure(SshFailure.Reason.SignIn, "no saved password"),
+                    )
+                }
+                SshLogin(target.user, auth, sshStore.hostKey(host.id), target.socket)
+            }
+        },
+        onHostKey = { key -> scope.launch { sshStore.saveHostKey(host.id, key) } },
+    )
+
     private companion object {
         const val BACKGROUND_GRACE_MS = 30_000L
+        const val SSH_CLOSE_DELAY_MS = 2_000L
         const val TAG = "RaxConnections"
     }
 }

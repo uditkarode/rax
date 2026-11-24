@@ -75,10 +75,11 @@ fun HomeRoute(graph: AppGraph, system: SystemActions, open: (Screen) -> Unit) {
                     }
                 }
             },
-            allow = { need ->
+            allow = { host, need ->
                 when (need) {
                     Need.TailscaleSignIn -> signIn()
                     Need.LocalNetwork -> system.askLocalNetwork()
+                    Need.HostKey -> currentOpen(Screen.HostEditor(host.id))
                 }
             },
             settings = { currentOpen(Screen.Settings) },

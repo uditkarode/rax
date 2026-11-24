@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 
 const val LAN_COMMAND = "rex server start \\\n  --extra-listen :7297 \\\n  --allow-anonymous"
 
-/** What Home shows before any computer is added: how to make Rex reachable, in two short parts. */
+/** What Home shows before any computer is added: the ways Rax can reach Rex, in short parts. */
 fun LazyListScope.welcome(mono: FontFamily, onTailscale: () -> Unit) {
     item(key = "welcome") {
         val c = Rax.colors
@@ -58,6 +58,9 @@ fun LazyListScope.welcome(mono: FontFamily, onTailscale: () -> Unit) {
                 style = RaxType.body,
                 color = c.link,
             )
+
+            Text(stringResource(R.string.welcome_ssh_title), Modifier.padding(top = 28.dp), style = RaxType.headline, color = c.text)
+            Text(stringResource(R.string.welcome_ssh_body), Modifier.padding(top = 6.dp), style = RaxType.body, color = c.textSecondary)
         }
     }
 }

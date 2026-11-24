@@ -126,6 +126,7 @@ androidComponents {
 
 dependencies {
     implementation(files(extractGoAar.flatMap { it.classesJar }))
+    implementation(project(":rex"))
 
     api(libs.kotlinx.coroutines.core)
     api(libs.okhttp)

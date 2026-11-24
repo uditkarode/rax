@@ -10,8 +10,10 @@ import de.uditkaro.rax.connection.TailnetKeeper
 import de.uditkaro.rax.data.Host
 import de.uditkaro.rax.data.HostStore
 import de.uditkaro.rax.data.PermissionStore
+import de.uditkaro.rax.data.PhoneKey
 import de.uditkaro.rax.data.Settings
 import de.uditkaro.rax.data.SettingsStore
+import de.uditkaro.rax.data.SshStore
 import de.uditkaro.rax.terminal.TerminalFonts
 import de.uditkaro.rax.tailnet.Tailnet
 import de.uditkaro.rax.tailnet.TailnetStatus
@@ -57,6 +59,11 @@ class AppGraph(val app: Application) {
 
     val hostStore = HostStore(app)
 
+    val sshStore = SshStore(app)
+
+    /** The SSH key Rax made on this phone, named after the phone in authorized_keys. */
+    val phoneKey = PhoneKey("rax@" + deviceName(app).trim().replace(Regex("\\s+"), "-"))
+
     val localNetwork = LocalNetwork(app)
 
     val notifications = NotificationAccess(app)
@@ -93,6 +100,9 @@ class AppGraph(val app: Application) {
         scope = scope,
         http = http,
         tailnetHttp = tailnetHttp,
+        dns = localNetwork.dns,
+        sshStore = sshStore,
+        phoneKey = phoneKey,
         tailnetUp = tailnet.status.map { it is TailnetStatus.Running }.stateIn(scope, SharingStarted.Eagerly, false),
         tailscaleApp = settings.map { it?.tailscaleApp }.stateIn(scope, SharingStarted.Eagerly, null),
         keepInBackground = backgroundAlerts.map { it == true }.stateIn(scope, SharingStarted.Eagerly, false),
@@ -199,3 +209,8 @@ class AppGraph(val app: Application) {
         scope.launch { settingsStore.block() }
     }
 }
+
+/** The name the user gave this phone, or its model. */
+fun deviceName(app: Application): String =
+    android.provider.Settings.Global.getString(app.contentResolver, android.provider.Settings.Global.DEVICE_NAME)
+        ?.takeIf { it.isNotBlank() } ?: android.os.Build.MODEL

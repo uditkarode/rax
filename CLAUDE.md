@@ -27,8 +27,9 @@ pane on it. Anything that changes state runs against the isolated test server
   connection, `RexHost` keeps one server's state current from its events, `TerminalStream` is one
   pane's data connection, and `StreamParser` splits that stream into snapshot, output and Rex's
   in-band messages.
-- `:tailnet`: Rax's own Tailscale node, Go `tsnet` bound with gomobile. Rax reaches tailnet hosts
-  without the Tailscale app and without a VPN. `tailnet/README.md` describes it in detail.
+- `:tailnet`: Rax's Go library, bound with gomobile: its own Tailscale node (`tsnet`), so Rax reaches
+  tailnet hosts without the Tailscale app and without a VPN, and its SSH client for `ssh://` hosts.
+  `tailnet/README.md` describes it in detail.
 - `:ghostty`: the terminal emulator and its Compose UI. It is libghostty-cmp with Rax's changes,
   over Ghostty's libghostty-vt built with Zig. `ghostty/README.md` describes it.
 - `:app`: the Compose UI, `Connections` (one `RexHost` per saved host), notifications (`Alerts`,
@@ -45,6 +46,11 @@ output. `:ghostty` restores the snapshot into an emulator and draws it. While th
 on screen the phone owns it, so its size applies, and it releases the pane when it leaves.
 Connections stay up while Rax is in the foreground, and in the background only while background
 alerts are on, which runs a foreground service.
+
+A host with an `ssh://` address gets an `SshLink`: one SSH connection that carries the control
+WebSocket and each pane's data WebSocket as separate channels to Rex's socket on the computer, the
+way `rex -S ssh://...` does. Its key or password is in `SshStore`, encrypted with a keystore key,
+and Rax's own key (`PhoneKey`) never leaves the keystore.
 
 ## Build and test
 
@@ -94,14 +100,14 @@ is optional. Use the types `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `b
 
 Load the matching skill before working in one of these areas:
 
-- `rex-protocol`: the control and data connections, events, resume, ownership, reject reasons, and
-  what to do when Rex updates.
+- `rex-protocol`: the control and data connections, events, resume, ownership, reject reasons, SSH
+  hosts, QR pairing, and what to do when Rex updates.
 - `pane-pipeline`: how an open pane goes from the data stream to the screen and back, and the
   loading, live, reconnecting and failed states.
 - `terminal-rendering`: how `:ghostty` draws, font fallback and glyph coverage, themes, and
   snapshot compatibility.
 - `tailnet`: the in-app Tailscale node and how hosts on a tailnet are found and reached.
-- `testing-against-rex`: the isolated Rex server, the emulator, and how to reproduce network
-  problems.
+- `testing-against-rex`: the isolated Rex server, the test SSH servers, the emulator, and how to
+  reproduce network problems.
 - `release-and-ci`: signing, versions, R8 settings, native libraries and the preview workflow.
 - `ui-design`: the design rules and the reasons behind them.

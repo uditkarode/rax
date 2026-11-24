@@ -1,6 +1,6 @@
 ---
 name: rex-protocol
-description: How Rax talks to a Rex server. Covers the control and data WebSockets, API revisions, the event-driven state store, reconnect and resume, the data handshake and its reject reasons, pane ownership, and what to do when Rex updates. Use when changing the :rex module, debugging connection or stream problems, or adapting Rax to a new Rex release.
+description: How Rax talks to a Rex server. Covers the control and data WebSockets, API revisions, the event-driven state store, reconnect and resume, the data handshake and its reject reasons, pane ownership, hosts reached through SSH, QR pairing, and what to do when Rex updates. Use when changing the :rex module, debugging connection or stream problems, or adapting Rax to a new Rex release.
 ---
 
 # Rex protocol, as Rax uses it
@@ -184,6 +184,33 @@ It serves HTTPS on port 443 only, with a MagicDNS certificate, so tailnet hosts 
 `https://<device>.<tailnet>.ts.net`. By default it admits only the Tailscale user who owns it. On a
 LAN, Rex needs `--extra-listen :7297 --allow-anonymous`, and Rax uses plain `ws://`. Rax finds Rex
 servers on the tailnet by probing `/api/control` on each peer: a WebSocket endpoint answers HTTP 426.
+
+`rex server tailscale pair` draws a QR code that holds only that `https://` address. Add host →
+Scan QR code reads it (ZXing, with inverted codes, since a dark terminal draws the modules light on
+dark) and fills in the bare name with Tailscale on.
+
+## SSH
+
+A host whose address is `ssh://user@host[:port][/socket]` reaches Rex the way `rex -S ssh://...`
+does (`docs/rex-protocol.md` 2.2): sign in, run `rex server start --json` to find the socket, then a
+forwarded channel to that socket per WebSocket, or `rex __internal dial-stdio` where forwarding is
+refused. Decisions on top:
+
+- One SSH connection per host (`SshLink` in `:app`), shared by the control connection and every
+  pane's stream. The Go side closes it 10 s after its last stream and after 3 missed keepalives, and
+  the next stream signs in again. A stream that does not open within 10 s ends the connection,
+  because a connection that went away without a word looks open until the keepalives notice.
+- `RexEndpoint.ssh` is set and the HTTP URL is a placeholder. The host's `OkHttpClient` comes from
+  `sshClientBuilder` in `:tailnet`: SSH sockets, a fixed loopback DNS, no proxy and
+  `retryOnConnectionFailure(false)`, so a refused sign-in is not tried again at once.
+- Sign-in, a changed host key and a missing `rex` are `Problem.Ssh` (`SshFailure` thrown by the
+  socket), and `RexClient` does not retry them on its own: they wait for Retry, the app coming to the
+  foreground or a network change. The handshake timeout is 30 s, since signing in and starting Rex
+  come first. A timeout or an unreachable computer is a plain `Unreachable`.
+- The host key is accepted the first time and saved in `SshStore`. A different key blocks the host
+  until the user trusts it in the host editor, which shows its SHA-256 fingerprint.
+- What to sign in with is read at each sign-in, so a new password applies at the next one without
+  rebuilding the host.
 
 ## When Rex updates
 

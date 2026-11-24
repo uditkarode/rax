@@ -5,7 +5,9 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import android.system.StructPollfd
+import de.uditkaro.rax.rex.SshFailure
 import java.io.FileDescriptor
+import java.io.IOException
 import java.io.InputStream
 import java.io.InterruptedIOException
 import java.io.OutputStream
@@ -22,8 +24,9 @@ import java.util.Objects
 import javax.net.SocketFactory
 import okhttp3.Dns
 
-internal class TailnetSocketFactory(private val node: Node, private val dns: Dns) : SocketFactory() {
-    override fun createSocket(): Socket = TailnetSocket(node)
+/** Makes [FdSocket]s that start each connection with [newDial]. [dns] looks up a name given to [createSocket]. */
+internal class FdSocketFactory(private val newDial: () -> PendingDial, private val dns: Dns) : SocketFactory() {
+    override fun createSocket(): Socket = FdSocket(newDial)
 
     override fun createSocket(host: String, port: Int): Socket =
         createSocket(dns.lookup(host).first(), port)
@@ -43,26 +46,47 @@ internal class TailnetSocketFactory(private val node: Node, private val dns: Dns
 
     private fun requireNoLocalAddress(address: InetAddress?, port: Int) {
         if ((address != null && !address.isAnyLocalAddress) || port != 0) {
-            throw SocketException("tailnet sockets cannot bind to a local address")
+            throw SocketException("these sockets cannot bind to a local address")
         }
     }
 }
 
 /**
- * A TCP connection through the node. The node dials the target and hands back
- * one end of a Unix socketpair whose other end it splices to the connection, so
- * this socket reads and writes a real file descriptor. TLS layered on top (by
- * OkHttp or Conscrypt) works as on any socket.
+ * Turns an error from the Go library into the exception OkHttp and RexClient expect. Go starts the
+ * message with a word that says why, such as `timeout` or `auth`. An [IOException] is already one.
  */
-internal class TailnetSocket private constructor(private val impl: TailnetSocketImpl) : Socket(impl) {
-    constructor(node: Node) : this(TailnetSocketImpl(node))
+internal fun goFailure(e: Exception): IOException {
+    if (e is IOException) return e
+    val message = e.message.orEmpty()
+    val word = message.substringBefore(": ", "")
+    val rest = message.substringAfter(": ")
+    return when (word) {
+        "timeout" -> SocketTimeoutException(message)
+        "auth" -> SshFailure(SshFailure.Reason.SignIn, rest)
+        "hostkey" -> SshFailure(SshFailure.Reason.HostKeyChanged, "the host key changed", hostKey = rest)
+        "norex" -> SshFailure(SshFailure.Reason.NoRex, rest)
+        "rex" -> SshFailure(SshFailure.Reason.RexFailed, rest)
+        "ssh" -> SshFailure(SshFailure.Reason.Other, rest)
+        else -> ConnectException(message)
+    }.apply { initCause(e) }
+}
+
+/**
+ * A connection that the Go library makes: TCP through the node, or a stream to
+ * Rex over SSH. Go dials the target and hands back one end of a Unix socketpair
+ * whose other end it splices to the connection, so this socket reads and writes
+ * a real file descriptor. TLS layered on top (by OkHttp or Conscrypt) works as
+ * on any socket. [newDial] starts each connection attempt.
+ */
+internal class FdSocket private constructor(private val impl: FdSocketImpl) : Socket(impl) {
+    constructor(newDial: () -> PendingDial) : this(FdSocketImpl(newDial))
 
     init {
         impl.owner = this
     }
 }
 
-internal class TailnetSocketImpl(private val node: Node) : SocketImpl() {
+internal class FdSocketImpl(private val newDial: () -> PendingDial) : SocketImpl() {
     var owner: Socket? = null
 
     private val lock = Any()
@@ -80,7 +104,7 @@ internal class TailnetSocketImpl(private val node: Node) : SocketImpl() {
         }
 
         override fun read(b: ByteArray, off: Int, len: Int): Int = readFd(b, off, len)
-        override fun available(): Int = this@TailnetSocketImpl.available()
+        override fun available(): Int = this@FdSocketImpl.available()
         override fun close() = closeOwner()
     }
 
@@ -91,7 +115,7 @@ internal class TailnetSocketImpl(private val node: Node) : SocketImpl() {
     }
 
     override fun create(stream: Boolean) {
-        if (!stream) throw SocketException("tailnet sockets are stream sockets only")
+        if (!stream) throw SocketException("these sockets are stream sockets only")
     }
 
     override fun connect(host: String, port: Int) = connect(InetSocketAddress(host, port), 0)
@@ -105,16 +129,12 @@ internal class TailnetSocketImpl(private val node: Node) : SocketImpl() {
         val pending = synchronized(lock) {
             if (closed) throw SocketException("Socket closed")
             check(pfd == null && dial == null) { "already connected" }
-            node.newDial().also { dial = it }
+            newDial().also { dial = it }
         }
         val fd = try {
             pending.dial(host, target.port, timeout)
         } catch (e: Exception) {
-            throw when {
-                closed -> SocketException("Socket closed")
-                e.message.orEmpty().startsWith("timeout:") -> SocketTimeoutException(e.message)
-                else -> ConnectException(e.message)
-            }.apply { initCause(e) }
+            throw if (closed) SocketException("Socket closed").apply { initCause(e) } else goFailure(e)
         } finally {
             synchronized(lock) { dial = null }
         }
@@ -256,9 +276,9 @@ internal class TailnetSocketImpl(private val node: Node) : SocketImpl() {
 
     override fun sendUrgentData(data: Int) = throw SocketException("urgent data is not supported")
 
-    override fun bind(host: InetAddress, port: Int) = throw SocketException("tailnet sockets cannot bind")
+    override fun bind(host: InetAddress, port: Int) = throw SocketException("these sockets cannot bind")
 
-    override fun listen(backlog: Int) = throw SocketException("tailnet sockets cannot listen")
+    override fun listen(backlog: Int) = throw SocketException("these sockets cannot listen")
 
-    override fun accept(s: SocketImpl) = throw SocketException("tailnet sockets cannot accept")
+    override fun accept(s: SocketImpl) = throw SocketException("these sockets cannot accept")
 }

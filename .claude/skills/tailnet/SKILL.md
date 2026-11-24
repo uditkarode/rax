@@ -90,6 +90,12 @@ A tailnet with network flow logs on needs that upload, so Tailscale stops the no
 its policy and says so on the Tailscale screen (`TailnetStatus.Error.loggingRequired`, detected by
 the backend's message in `go/node.go`).
 
+## The Go library also holds SSH
+
+An app can load only one gomobile library, so the SSH client for `ssh://` hosts is in the same Go
+package (`go/ssh.go`), see `rex-protocol`. Its streams reach Kotlin as the same `FdSocket` that
+tailnet connections use. A host with both SSH and the tailnet flag dials SSH through the node.
+
 ## Build traps
 
 - gomobile's generated main package has no Go build info, so Tailscale would report its version to
