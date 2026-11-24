@@ -1,0 +1,13 @@
+<!-- OrbStack, drawn for Rax -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M0.9 13.1A10 10 0 1 1 20.9 13.1A10 10 0 1 1 0.9 13.1Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M16.85 21.87A11 11 0 1 0 2.13 7.15A10.6 10.6 0 1 1 16.85 21.87Z" />
+</vector>

@@ -132,14 +132,15 @@ fun parseArgb(hex: String): Int {
 }
 
 /**
- * [color] when it reads well as text on [background], else [color] moved toward [toward] until it
- * does. Some themes have a muted accent meant for filled controls, which is too faint for words and
- * icons, and links must still look like links.
+ * [color] when it has [minContrast] against [background], else [color] moved toward [toward] until
+ * it does. Some themes have a muted accent meant for filled controls, which is too faint for words
+ * and icons, and links must still look like links. 4.5 is the contrast text needs, 3 is enough for
+ * an icon.
  */
-internal fun readableOn(color: Color, background: Color, toward: Color): Color {
+internal fun readableOn(color: Color, background: Color, toward: Color, minContrast: Float = 4.5f): Color {
     for (step in 0..LINK_STEPS) {
         val candidate = lerp(color, toward, step.toFloat() / LINK_STEPS)
-        if (contrast(candidate, background) >= 4.5f) return candidate
+        if (contrast(candidate, background) >= minContrast) return candidate
     }
     return toward
 }

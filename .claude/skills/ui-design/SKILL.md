@@ -65,10 +65,18 @@ spacing, touch targets and colours stay the same everywhere. Icons are Material 
 drawables in `res/drawable`. Delete an icon when its last use goes.
 
 Program logos (`ic_program_*`) come from Simple Icons (CC0), and from Lobe Icons (MIT) for AI
-tools that Simple Icons lacks, such as Codex. `tools/program-icons.py` converts both. Rex.app has
-its own logo set, but those files belong to Superlogical.
+tools that Simple Icons lacks, such as Codex. `tools/program-icons.py` converts both. A logo
+neither set has is traced to one colour from the project's own logo file (jj, yazi, mise), or drawn
+for Rax (Crush, kakoune). Programs that have no logo but do one clear thing, such as `sleep`,
+`caffeinate`, `top` and log viewers, get a Material Symbol or a drawn symbol. Rex.app has its own
+logo set, which serves as the reference for which programs get a logo and how each looks, but those
+files belong to Superlogical and are not copied.
 `programIcon` in `HomeMapping.kt` picks a logo from the agent's ID or the process names. A program
 without a logo gets the terminal icon if it is a shell, else its first letter.
+
+Logos take the theme's colour (the accent for agents), except the ones Rex shows in colour, which
+keep their colour (`logoColors` in `ProgramGlyph.kt`). A colour too faint on the tile moves toward
+the text colour.
 
 A bottom sheet is a `RaxSheet`. It keeps the screen behind it dimmed while the user drags it, and
 the dim fades only when the sheet leaves. Material's own sheet drops its dim as soon as a drag

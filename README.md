@@ -75,6 +75,6 @@ Android client for Rex.
 
 Rax draws the terminal with [libghostty-cmp](https://github.com/xchacha20-poly1305/libghostty-cmp)
 and [Ghostty](https://ghostty.org), connects over [Tailscale](https://github.com/tailscale/tailscale),
-reads QR codes with [ZXing](https://github.com/zxing/zxing), and shows program logos from [Simple Icons](https://simpleicons.org) and
-[Lobe Icons](https://github.com/lobehub/lobe-icons). The color themes come from
+reads QR codes with [ZXing](https://github.com/zxing/zxing), and shows program logos from [Simple Icons](https://simpleicons.org),
+[Lobe Icons](https://github.com/lobehub/lobe-icons) and the programs' own projects. The color themes come from
 Rex. Settings → Acknowledgements lists licenses for everything used.

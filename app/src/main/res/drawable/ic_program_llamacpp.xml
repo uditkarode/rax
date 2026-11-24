@@ -1,0 +1,11 @@
+<!-- llama.cpp, traced from the llama.cpp project's logo -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"
+        android:pathData="M0.17 15.56L9.62 15.56C9.37 16.09 9.02 16.58 8.74 17.09C7.88 18.62 6.97 20.13 6.11 21.66C5.73 22.33 5.16 23.04 4.91 23.77L14.22 23.77C15.79 23.77 17.53 24 18.93 23.13C20.02 22.44 20.55 21.26 21.17 20.18C21.78 19.11 22.4 18.05 23.01 16.98C23.28 16.51 23.6 16.05 23.83 15.56L9.65 15.56L15.3 5.76L17.35 2.2L18.54 0.12L12.99 0.12C11.86 0.12 10.71 -0 9.67 0.51C8.57 1.04 8.01 1.97 7.42 2.99C7.05 3.63 6.68 4.27 6.31 4.91C4.91 7.36 3.48 9.8 2.08 12.24C1.45 13.33 0.69 14.41 0.17 15.56z" />
+</vector>

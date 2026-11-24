@@ -17,21 +17,40 @@ SVG = "{http://www.w3.org/2000/svg}"
 CREDITS = {"simple-icons": "Simple Icons (CC0 1.0)", "lobe-icons": "Lobe Icons (MIT)"}
 
 
+def full_canvas_clip(root: ET.Element, ref: str) -> bool:
+    """Whether a clip-path="url(#id)" clips to the whole canvas, which leaves the shapes as they are."""
+    clip_id = ref.removeprefix("url(#").removesuffix(")")
+    clip = root.find(f".//{SVG}clipPath[@id='{clip_id}']")
+    return clip is not None and [p.get("d") for p in clip] == ["M0 0h24v24H0z"]
+
+
+def shapes(root: ET.Element, parent: ET.Element, rule: str):
+    """Yields (path data, fill rule) for each path, through groups that change nothing."""
+    for el in parent:
+        tag = el.tag.removeprefix(SVG)
+        if tag in ("title", "defs"):
+            continue
+        clip = el.get("clip-path")
+        if "transform" in el.attrib or "mask" in el.attrib or (clip and not full_canvas_clip(root, clip)):
+            raise ValueError(f"unsupported <{tag}>")
+        el_rule = el.get("fill-rule", rule)
+        if tag == "g":
+            yield from shapes(root, el, el_rule)
+        elif tag == "path" and el.get("fill") in (None, "currentColor"):
+            yield el.get("d"), el_rule
+        else:
+            raise ValueError(f"unsupported <{tag}>")
+
+
 def convert(svg_file: pathlib.Path, credit: str) -> str:
     root = ET.parse(svg_file).getroot()
     if root.get("viewBox") != "0 0 24 24":
         raise ValueError("viewBox is not 0 0 24 24")
     title = root.findtext(f"{SVG}title") or svg_file.stem
     paths = []
-    for el in root.iter():
-        tag = el.tag.removeprefix(SVG)
-        if tag in ("svg", "title"):
-            continue
-        if tag != "path" or "transform" in el.attrib or el.get("fill") not in (None, "currentColor"):
-            raise ValueError(f"unsupported <{tag}>")
-        rule = el.get("fill-rule", root.get("fill-rule", "nonzero"))
+    for d, rule in shapes(root, root, root.get("fill-rule", "nonzero")):
         fill_type = '\n        android:fillType="evenOdd"' if rule == "evenodd" else ""
-        paths.append(f'    <path\n        android:fillColor="#FF000000"{fill_type}\n        android:pathData="{el.get("d")}" />')
+        paths.append(f'    <path\n        android:fillColor="#FF000000"{fill_type}\n        android:pathData="{d}" />')
     if not paths:
         raise ValueError("no paths")
     return (
