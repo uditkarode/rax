@@ -194,7 +194,7 @@ fun TerminalScreen(graph: AppGraph, system: SystemActions, vm: TerminalViewModel
             TopBar(
                 title = header.title.ifEmpty { vm.live?.host?.name.orEmpty() },
                 subtitle = header.subtitle,
-                glyph = { tab?.let { ProgramGlyph(it.program, it.programName, it.icon, size = 30.dp) } },
+                glyph = { tab?.let { ProgramGlyph(it.program, it.programName, it.icon, height = 26.dp) } },
                 vm = vm,
                 currentWindowId = target?.windowId,
                 // The tab menu and the actions need the tab's layout.
@@ -409,7 +409,7 @@ private fun TopBar(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         },
-                        leadingIcon = { ProgramGlyph(row.program, row.programName, row.icon, size = 24.dp) },
+                        leadingIcon = { ProgramGlyph(row.program, row.programName, row.icon, height = 20.dp) },
                         trailingIcon = {
                             if (w.id == currentWindowId) RaxIcon(R.drawable.ic_check, null, tint = c.link, size = 20.dp)
                         },

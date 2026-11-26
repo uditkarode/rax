@@ -74,9 +74,11 @@ files belong to Superlogical and are not copied.
 `programIcon` in `HomeMapping.kt` picks a logo from the agent's ID or the process names. A program
 without a logo gets the terminal icon if it is a shell, else its first letter.
 
-Logos take the theme's colour (the accent for agents), except the ones Rex shows in colour, which
-keep their colour (`logoColors` in `ProgramGlyph.kt`). A colour too faint on the tile moves toward
-the text colour.
+As in Rex, each logo sits on its own coloured tile, 1.3 times as wide as it is tall. The tile is
+mostly the brand's colour from Simple Icons or Lobe Icons, with the logo in white, or near black on
+a tile too light for white. Shells are green on dark grey, and logos with no brand colour are light
+grey on dark grey (`ProgramLogoColors.kt`). Tiles keep their colours in every theme, so each logo
+stays visible in light and dark ones.
 
 A bottom sheet is a `RaxSheet`. It keeps the screen behind it dimmed while the user drags it, and
 the dim fades only when the sheet leaves. Material's own sheet drops its dim as soon as a drag
