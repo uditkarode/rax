@@ -78,7 +78,8 @@ As in Rex, each logo sits on its own coloured tile, 1.3 times as wide as it is t
 mostly the brand's colour from Simple Icons or Lobe Icons, with the logo in white, or near black on
 a tile too light for white. Shells are green on dark grey, and logos with no brand colour are light
 grey on dark grey (`ProgramLogoColors.kt`). Tiles keep their colours in every theme, so each logo
-stays visible in light and dark ones.
+stays visible in light and dark ones. Like Rex's, each tile has a soft light from the top, a thin
+light rim inside the edge and a faint dark line around it (`drawTile` in `ProgramGlyph.kt`).
 
 A bottom sheet is a `RaxSheet`. It keeps the screen behind it dimmed while the user drags it, and
 the dim fades only when the sheet leaves. Material's own sheet drops its dim as soon as a drag
